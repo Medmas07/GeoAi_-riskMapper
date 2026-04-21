@@ -1,44 +1,115 @@
 import { create } from "zustand";
-import type { BBox, AnalysisResult, RiskLayer, MapillaryImage } from "@/types";
 
-type ActiveLayer = "flood" | "heat" | "images";
+export type Mode = "simple" | "advanced";
 
-interface AnalysisStore {
-  bbox: BBox | null;
-  setBbox: (bbox: BBox | null) => void;
-
-  runId: string | null;
-  status: string;
-  result: AnalysisResult | null;
-  setResult: (r: AnalysisResult) => void;
-  setRunId: (id: string, status: string) => void;
-
-  activeLayer: ActiveLayer;
-  setActiveLayer: (l: ActiveLayer) => void;
-
-  images: MapillaryImage[];
-  setImages: (imgs: MapillaryImage[]) => void;
-
-  selectedImageId: string | null;
-  setSelectedImage: (id: string | null) => void;
+export interface TrajectoryPoint {
+  lat: number;
+  lon: number;
+  elevation: number;
+  image_id: string;
 }
 
-export const useAnalysisStore = create<AnalysisStore>((set) => ({
-  bbox: null,
-  setBbox: (bbox) => set({ bbox }),
+export interface ImagePoint {
+  id: string;
+  url: string;
+  lat: number;
+  lon: number;
+}
 
-  runId: null,
-  status: "idle",
-  result: null,
-  setResult: (result) => set({ result, status: result.status }),
-  setRunId: (runId, status) => set({ runId, status }),
+export interface ProfilePoint {
+  distance: number;
+  elevation: number;
+  slope: number;
+}
 
-  activeLayer: "flood",
-  setActiveLayer: (activeLayer) => set({ activeLayer }),
+export interface AOI {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
 
+interface AnalysisStore {
+  mode: Mode;
+  currentIndex: number;
+  trajectory: TrajectoryPoint[];
+  images: ImagePoint[];
+  profile: ProfilePoint[];
+  isPlaying: boolean;
+  aoi: AOI | null;
+  isRunning: boolean;
+
+  setIndex: (index: number) => void;
+  setAOI: (aoi: AOI | null) => void;
+  setMode: (mode: Mode) => void;
+  play: () => void;
+  pause: () => void;
+  next: () => void;
+  prev: () => void;
+  setData: (payload: {
+    trajectory: TrajectoryPoint[];
+    images: ImagePoint[];
+    profile: ProfilePoint[];
+  }) => void;
+  setRunning: (running: boolean) => void;
+}
+
+function clampIndex(index: number, len: number) {
+  if (len <= 0) return 0;
+  if (index < 0) return 0;
+  if (index >= len) return len - 1;
+  return index;
+}
+
+export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
+  mode: "simple",
+  currentIndex: 0,
+  trajectory: [],
   images: [],
-  setImages: (images) => set({ images }),
+  profile: [],
+  isPlaying: false,
+  aoi: null,
+  isRunning: false,
 
-  selectedImageId: null,
-  setSelectedImage: (selectedImageId) => set({ selectedImageId }),
+  setIndex: (index) =>
+    set((state) => ({
+      currentIndex: clampIndex(index, state.trajectory.length),
+    })),
+
+  setAOI: (aoi) => set({ aoi }),
+  setMode: (mode) => set({ mode }),
+  play: () => set({ isPlaying: true }),
+  pause: () => set({ isPlaying: false }),
+
+  next: () =>
+    set((state) => {
+      if (!state.trajectory.length) return state;
+      const last = state.trajectory.length - 1;
+      if (state.currentIndex >= last) return { currentIndex: last, isPlaying: false };
+      return { currentIndex: state.currentIndex + 1 };
+    }),
+
+  prev: () =>
+    set((state) => ({
+      currentIndex: clampIndex(state.currentIndex - 1, state.trajectory.length),
+    })),
+
+  setData: ({ trajectory, images, profile }) =>
+    set({
+      trajectory,
+      images,
+      profile,
+      currentIndex: 0,
+      mode: "advanced",
+      isPlaying: false,
+      isRunning: false,
+    }),
+
+  setRunning: (isRunning) => set({ isRunning }),
 }));
+
+export function currentImageFromStore() {
+  const { images, currentIndex } = useAnalysisStore.getState();
+  if (!images.length) return null;
+  return images[clampIndex(currentIndex, images.length)];
+}

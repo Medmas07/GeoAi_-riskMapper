@@ -1,26 +1,40 @@
 "use client";
-import { useCallback } from "react";
-import { api } from "@/lib/api";
+
 import { useAnalysisStore } from "@/store/analysis";
 
 export function useAnalysis() {
-  const { bbox, setRunId, setResult, setImages } = useAnalysisStore();
+  const setRunning = useAnalysisStore((s) => s.setRunning);
+  const setData = useAnalysisStore((s) => s.setData);
+  const aoi = useAnalysisStore((s) => s.aoi);
 
-  const runAnalysis = useCallback(async () => {
-    if (!bbox) return;
+  async function runAnalysis() {
+    setRunning(true);
+    await new Promise((r) => setTimeout(r, 450));
 
-    // Fetch images in parallel with analysis
-    const [{ run_id, status }] = await Promise.all([
-      api.analysis.run({ bbox, weather_days_back: 7 }),
-      api.mapillary.images(bbox.west, bbox.south, bbox.east, bbox.north).then(setImages),
-    ]);
+    const base = aoi ?? {
+      west: 3.01,
+      south: 36.67,
+      east: 3.16,
+      north: 36.79,
+    };
 
-    setRunId(run_id, status);
+    const trajectory = [
+      { lat: base.south, lon: base.west, elevation: 112, image_id: "img-0" },
+      { lat: base.north, lon: base.east, elevation: 138, image_id: "img-1" },
+    ];
+    const images = trajectory.map((p, i) => ({
+      id: `img-${i}`,
+      url: `https://picsum.photos/seed/fallback-${i}/1200/700`,
+      lat: p.lat,
+      lon: p.lon,
+    }));
+    const profile = [
+      { distance: 0, elevation: trajectory[0].elevation, slope: 0 },
+      { distance: 2200, elevation: trajectory[1].elevation, slope: 1.18 },
+    ];
 
-    // Poll until complete
-    const result = await api.analysis.poll(run_id);
-    setResult(result);
-  }, [bbox, setRunId, setResult, setImages]);
+    setData({ trajectory, images, profile });
+  }
 
   return { runAnalysis };
 }
