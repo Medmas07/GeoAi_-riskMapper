@@ -36,7 +36,8 @@ export default function RiskMap() {
     map.on("mousemove", (e: L.LeafletMouseEvent) => {
       if (!drawing || !startLatLng) return;
       if (rect) rect.remove();
-      rect = L.rectangle([startLatLng, e.latlng], {
+      const bounds = L.latLngBounds(startLatLng, e.latlng);
+      rect = L.rectangle(bounds, {
         color: "#2563eb",
         weight: 2,
         fillOpacity: 0.1,
