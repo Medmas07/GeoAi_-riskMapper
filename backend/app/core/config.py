@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     MAPILLARY_ACCESS_TOKEN: str = ""
     MAPILLARY_API_BASE: str = "https://graph.mapillary.com"
 
+    # Elevation providers
+    ORS_API_KEY: str = ""
+    GEONAMES_USERNAME: str = ""
+
     # Weather
     WEATHER_PROVIDER: Literal["open_meteo", "openweather"] = "open_meteo"
     OPENWEATHER_API_KEY: str = ""
