@@ -54,6 +54,9 @@ interface AnalysisStore {
   floodLayers: RiskLayer[];
   heatLayers: RiskLayer[];
   activeLayer: "flood" | "heat";
+  
+  // FlyTo state
+  flyToTarget: { lat: number; lon: number; zoom: number } | null;
 
   setIndex: (index: number) => void;
   setAOI: (aoi: AOI | null) => void;
@@ -74,6 +77,10 @@ interface AnalysisStore {
   // Risk layer setters
   setRiskResults: (flood: RiskLayer[], heat: RiskLayer[]) => void;
   setActiveLayer: (layer: "flood" | "heat") => void;
+  
+  // FlyTo setters
+  flyTo: (target: { lat: number; lon: number; zoom: number }) => void;
+  clearFlyTo: () => void;
 }
 
 function clampIndex(index: number, len: number) {
@@ -99,6 +106,9 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   floodLayers: [],
   heatLayers: [],
   activeLayer: "flood",
+  
+  // Initial FlyTo state
+  flyToTarget: null,
 
   setIndex: (index) =>
     set((state) => ({
@@ -141,6 +151,10 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   // Implementation of risk layer setters
   setRiskResults: (flood, heat) => set({ floodLayers: flood, heatLayers: heat }),
   setActiveLayer: (layer) => set({ activeLayer: layer }),
+  
+  // Implementation of FlyTo setters
+  flyTo: (target) => set({ flyToTarget: target }),
+  clearFlyTo: () => set({ flyToTarget: null }),
 }));
 
 export function currentImageFromStore() {
