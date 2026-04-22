@@ -51,6 +51,34 @@ class ElevationProvider(ABC):
             raise last_error
         raise TimeoutError(f"{self.name} request timed out")
 
+    async def _request_text(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        *,
+        deadline: float,
+        **kwargs,
+    ) -> str:
+        last_error: Exception | None = None
+
+        for _ in range(self.retries + 1):
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+
+            timeout = min(1.5, remaining)
+            try:
+                response = await client.request(method, url, timeout=timeout, **kwargs)
+                response.raise_for_status()
+                return response.text
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+
+        if last_error is not None:
+            raise last_error
+        raise TimeoutError(f"{self.name} request timed out")
+
 
 class PointElevationProvider(ElevationProvider):
     """
@@ -75,4 +103,3 @@ class PointElevationProvider(ElevationProvider):
     @abstractmethod
     async def _fetch_points(self, sampled_line: list[Coordinate]) -> list[float]:
         """Return elevations for sampled points in same order."""
-

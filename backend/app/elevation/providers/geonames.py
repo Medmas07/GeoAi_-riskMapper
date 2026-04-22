@@ -4,6 +4,7 @@ from time import monotonic
 import httpx
 
 from app.core.config import settings
+from app.elevation.catalog import GEONAMES_DATASETS
 from app.elevation.providers.base import PointElevationProvider
 from app.elevation.utils import Coordinate
 
@@ -11,7 +12,20 @@ from app.elevation.utils import Coordinate
 class GeoNamesProvider(PointElevationProvider):
     name = "geonames"
     base_url = "http://api.geonames.org"
-    datasets = ("srtm1", "srtm3", "astergdem")
+    default_datasets = ("srtm1", "srtm3", "astergdem", "gtopo30")
+
+    def __init__(self, dataset: str | None = None):
+        # If dataset is provided, force this dataset only.
+        if dataset:
+            normalized = dataset.strip().lower()
+            if normalized not in GEONAMES_DATASETS:
+                raise ValueError(
+                    f"Unsupported GeoNames dataset '{dataset}'. "
+                    f"Allowed: {', '.join(GEONAMES_DATASETS.keys())}"
+                )
+            self.datasets = (normalized,)
+        else:
+            self.datasets = self.default_datasets
 
     async def _fetch_points(self, sampled_line: list[Coordinate]) -> list[float]:
         if not settings.GEONAMES_USERNAME:
@@ -38,6 +52,7 @@ class GeoNamesProvider(PointElevationProvider):
             url = f"{self.base_url}/{dataset}"
             data_text = await self._request_text(
                 client,
+                "GET",
                 url,
                 deadline=deadline,
                 params={
@@ -53,33 +68,6 @@ class GeoNamesProvider(PointElevationProvider):
 
         raise RuntimeError(f"GeoNames has no elevation for ({lat}, {lon})")
 
-    async def _request_text(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-        *,
-        deadline: float,
-        **kwargs,
-    ) -> str:
-        last_error: Exception | None = None
-        for _ in range(self.retries + 1):
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                break
-
-            timeout = min(1.5, remaining)
-            try:
-                response = await client.get(url, timeout=timeout, **kwargs)
-                response.raise_for_status()
-                return response.text.strip()
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-
-        if last_error is not None:
-            raise last_error
-        raise TimeoutError("GeoNames request timed out")
-
-
 def _parse_geonames_elevation(text: str) -> float | None:
     # GeoNames can return plain integer values or textual errors.
     try:
@@ -91,4 +79,3 @@ def _parse_geonames_elevation(text: str) -> float | None:
     if value in (-32768.0, -9999.0):
         return None
     return value
-

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # Elevation providers
     ORS_API_KEY: str = ""
     GEONAMES_USERNAME: str = ""
+    ELEVATION_OPENTOPODATA_DATASET: str = "srtm30m"
+    ELEVATION_OPENTOPOGRAPHY_DEMTYPE: str = "SRTMGL1"
 
     # Weather
     WEATHER_PROVIDER: Literal["open_meteo", "openweather"] = "open_meteo"

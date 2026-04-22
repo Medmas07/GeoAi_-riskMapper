@@ -3,14 +3,22 @@ from __future__ import annotations
 from time import monotonic
 import httpx
 
+from app.elevation.catalog import normalize_opentopodata_dataset
 from app.elevation.providers.base import PointElevationProvider
 from app.elevation.utils import Coordinate
 
 
 class OpenTopoDataProvider(PointElevationProvider):
     name = "opentopodata"
-    endpoint = "https://api.opentopodata.org/v1/srtm90m"
+    base_endpoint = "https://api.opentopodata.org/v1"
     chunk_size = 100
+
+    def __init__(self, dataset: str = "srtm30m"):
+        self.dataset = normalize_opentopodata_dataset(dataset)
+
+    @property
+    def endpoint(self) -> str:
+        return f"{self.base_endpoint}/{self.dataset}"
 
     async def _fetch_points(self, sampled_line: list[Coordinate]) -> list[float]:
         deadline = monotonic() + self.timeout_budget_s
@@ -39,4 +47,3 @@ class OpenTopoDataProvider(PointElevationProvider):
                     elevations.append(float(elevation))
 
         return elevations
-
