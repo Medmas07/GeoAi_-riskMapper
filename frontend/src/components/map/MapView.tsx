@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useAnalysisStore, type TrajectoryPoint } from "@/store/analysis";
@@ -86,6 +86,13 @@ function nearestTrajectoryIndex(
   return bestIndex;
 }
 
+function clampIndex(index: number, len: number) {
+  if (len <= 0) return 0;
+  if (index < 0) return 0;
+  if (index >= len) return len - 1;
+  return index;
+}
+
 function corridorWeightPx(
   map: L.Map,
   widthMeters: number,
@@ -109,6 +116,7 @@ const RDP_EPSILON = 0.0001;
 export default function MapView() {
   const mode = useAnalysisStore((s) => s.mode);
   const trajectory = useAnalysisStore((s) => s.trajectory);
+  const images = useAnalysisStore((s) => s.images);
   const drawnPath = useAnalysisStore((s) => s.drawnPath);
   const currentIndex = useAnalysisStore((s) => s.currentIndex);
   const setIndex = useAnalysisStore((s) => s.setIndex);
@@ -125,7 +133,7 @@ export default function MapView() {
   const mapRef = useRef<L.Map | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
   const lineRef = useRef<L.Polyline | null>(null);
-  const markerRef = useRef<L.CircleMarker | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
   const aoiRectRef = useRef<L.Rectangle | null>(null);
   const riskLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -136,21 +144,47 @@ export default function MapView() {
   const redoStackRef = useRef<L.LatLng[]>([]);
   const cursorPointRef = useRef<L.Point | null>(null);
   const autoPanRafRef = useRef<number | null>(null);
-  const drawPolylineRef = useRef<L.Polyline | null>(null); // live preview while drawing
-  const pathCorridorRef = useRef<L.Polyline | null>(null); // visible width around selected path
-  const snappedPreviewLineRef = useRef<L.Polyline | null>(null); // ghost snapped preview
+  const drawPolylineRef = useRef<L.Polyline | null>(null);
+  const pathCorridorRef = useRef<L.Polyline | null>(null);
+  const snappedPreviewLineRef = useRef<L.Polyline | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
   const previewRequestSeqRef = useRef(0);
   const lastPreviewAtRef = useRef(0);
-  const simplifiedPolylineRef = useRef<L.Polyline | null>(null); // shown after release
-  const pointsRef = useRef<TrajectoryPoint[]>([]); // trajectory snapshot for click handler
+  const simplifiedPolylineRef = useRef<L.Polyline | null>(null);
+  const pointsRef = useRef<TrajectoryPoint[]>([]);
 
   const [basemap, setBasemap] = useState<Basemap>("osm");
-  const [drawMode, setDrawMode] = useState(false); // pen mode toggle
+  const [drawMode, setDrawMode] = useState(false);
   const [, setDrawRevision] = useState(0);
-  const drawModeRef = useRef(false); // stable ref for event handlers
+  const [copiedCoords, setCopiedCoords] = useState(false);
+  // ✅ NEW: tracks when the map is fully initialized so marker effect can run
+  const [mapReady, setMapReady] = useState(false);
 
-  // Keep refs in sync with state
+  const drawModeRef = useRef(false);
+  const activeImage = images[clampIndex(currentIndex, images.length)];
+  const googlePinIcon = useMemo(
+    () =>
+      L.divIcon({
+        html: '<span class="google-pin-emoji" aria-hidden="true">📍</span>',
+        iconSize: [28, 42],
+        iconAnchor: [14, 42],
+        className: "google-pin-icon",
+      }),
+    []
+  );
+
+  const copyActiveImageCoords = useCallback(async () => {
+    if (!activeImage) return;
+    const coords = `${activeImage.lat.toFixed(6)}, ${activeImage.lon.toFixed(6)}`;
+    try {
+      await navigator.clipboard.writeText(coords);
+      setCopiedCoords(true);
+      window.setTimeout(() => setCopiedCoords(false), 1400);
+    } catch {
+      setCopiedCoords(false);
+    }
+  }, [activeImage]);
+
   useEffect(() => {
     drawModeRef.current = drawMode;
   }, [drawMode]);
@@ -304,7 +338,7 @@ export default function MapView() {
             opacity: 1.0,
             lineCap: "round",
             lineJoin: "round",
-            className: "path-glow-animation"
+            className: "path-glow-animation",
           }).addTo(map);
         }
 
@@ -400,14 +434,12 @@ export default function MapView() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [drawMode, undoLastPoint, redoLastPoint, applyPathState, stopAutoPanLoop, clearSnappedPreview]);
 
-  // Toggle draw mode — also disables map drag
   const toggleDrawMode = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
     setDrawMode((prev) => {
       const next = !prev;
       if (next) {
-        // Just entered draw mode – clear old path
         rawPathRef.current = [];
         redoStackRef.current = [];
         if (drawPolylineRef.current) {
@@ -418,13 +450,10 @@ export default function MapView() {
           simplifiedPolylineRef.current.remove();
           simplifiedPolylineRef.current = null;
         }
-
-        // Keep normal dragging enabled for click-and-pan, just don't double click to zoom
         map.doubleClickZoom.disable();
         map.getContainer().style.cursor = "crosshair";
         setDrawRevision((v) => v + 1);
       } else {
-        // Exited draw mode
         map.doubleClickZoom.enable();
         map.getContainer().style.cursor = "";
         stopAutoPanLoop();
@@ -446,6 +475,10 @@ export default function MapView() {
       preferCanvas: false,
     }).setView([36.83, 10.15], 11);
 
+    const cursorPane = map.createPane("cursorPane");
+    cursorPane.style.zIndex = "950";
+    cursorPane.style.pointerEvents = "none";
+
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
     tileRef.current = L.tileLayer(TILE_URL.osm, {
@@ -453,15 +486,12 @@ export default function MapView() {
       maxZoom: 20,
     }).addTo(map);
 
-    // ---- Point-by-point drawing events ----
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (drawModeRef.current) {
-        // We are in draw mode, add a point
         rawPathRef.current.push(e.latlng);
         redoStackRef.current = [];
         applyPathState(rawPathRef.current);
       } else {
-        // Click-to-seek along trajectory (only when not drawing)
         if (!pointsRef.current.length) return;
         const idx = nearestTrajectoryIndex(
           pointsRef.current,
@@ -472,8 +502,6 @@ export default function MapView() {
       }
     });
 
-    // Provide visual feedback with mouse movement (optional but good for UX)
-    // We can show a line from the last point to the cursor
     let cursorLine: L.Polyline | null = null;
     map.on("mousemove", (e: L.LeafletMouseEvent) => {
       cursorPointRef.current = e.containerPoint;
@@ -504,8 +532,7 @@ export default function MapView() {
       }
     });
 
-    // Right-click or double-click to finish or remove preview
-    map.on("contextmenu", (e: L.LeafletMouseEvent) => {
+    map.on("contextmenu", () => {
       if (drawModeRef.current) {
         clearSnappedPreview();
         if (cursorLine) {
@@ -516,11 +543,20 @@ export default function MapView() {
     });
 
     mapRef.current = map;
+    // ✅ Signal that the map is ready so the marker effect can run
+    setMapReady(true);
+
     return () => {
       stopAutoPanLoop();
       clearSnappedPreview();
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
+      // ✅ Reset on unmount so next mount triggers marker effect again
+      setMapReady(false);
     };
   }, [setAOI, setDrawnPath, setIndex, applyPathState, startAutoPanLoop, stopAutoPanLoop, clearSnappedPreview, updateSnappedPreview]);
 
@@ -538,7 +574,7 @@ export default function MapView() {
   }, [basemap]);
 
   // ---------------------------------------------------------------------------
-  // AOI rectangle (bbox derived from drawn path)
+  // AOI rectangle
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const map = mapRef.current;
@@ -617,7 +653,7 @@ export default function MapView() {
         opacity: 0.9,
         lineCap: "round",
         lineJoin: "round",
-        className: "path-neon-glow"
+        className: "path-neon-glow",
       }).addTo(map);
       lineRef.current.bringToFront();
       return;
@@ -632,12 +668,12 @@ export default function MapView() {
       opacity: 0.85,
       lineCap: "round",
       lineJoin: "round",
-      className: "path-neon-glow"
+      className: "path-neon-glow",
     }).addTo(map);
   }, [trajectory, drawnPath]);
 
   // ---------------------------------------------------------------------------
-  // Path corridor visualization (line width)
+  // Path corridor visualization
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const map = mapRef.current;
@@ -684,13 +720,13 @@ export default function MapView() {
 
   // ---------------------------------------------------------------------------
   // Trajectory playback marker
+  // ✅ mapReady added to deps so this re-runs after map initializes
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const point = trajectory[currentIndex];
-    if (!point) {
+    if (mode !== "advanced") {
       if (markerRef.current) {
         markerRef.current.remove();
         markerRef.current = null;
@@ -698,27 +734,43 @@ export default function MapView() {
       return;
     }
 
-    const latlng = [point.lat, point.lon] as L.LatLngTuple;
-    if (!markerRef.current) {
-      markerRef.current = L.circleMarker(latlng, {
-        radius: 8,
-        color: "#ffffff",
-        fillColor: "#00f3ff",
-        fillOpacity: 1,
-        weight: 3,
-        className: "marker-pulse"
-      }).addTo(map);
-    } else {
-      markerRef.current.setLatLng(latlng);
+    const activeImage = images[clampIndex(currentIndex, images.length)];
+    const fallbackTrajectoryPoint = trajectory[clampIndex(currentIndex, trajectory.length)];
+
+    const markerLat = activeImage?.lat ?? fallbackTrajectoryPoint?.lat;
+    const markerLon = activeImage?.lon ?? fallbackTrajectoryPoint?.lon;
+
+    if (markerLat === undefined || markerLon === undefined) {
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
+      return;
     }
 
-    // Rather than just panTo, verify if the point is far out of view, and nicely fly to it
+    const latlng = [markerLat, markerLon] as L.LatLngTuple;
+
+    if (!markerRef.current) {
+      markerRef.current = L.marker(latlng, {
+        icon: googlePinIcon,
+        zIndexOffset: 9999,
+        keyboard: false,
+      }).addTo(map);
+    } else {
+      if (!map.hasLayer(markerRef.current)) {
+        markerRef.current.addTo(map);
+      }
+      markerRef.current.setLatLng(latlng);
+      markerRef.current.setIcon(googlePinIcon);
+      markerRef.current.setZIndexOffset(9999);
+    }
+
     if (!map.getBounds().contains(latlng)) {
       map.flyTo(latlng, map.getZoom(), { animate: true, duration: 0.8 });
     } else {
       map.panTo(latlng, { animate: true, duration: 0.3 });
     }
-  }, [trajectory, currentIndex]);
+  }, [mode, images, trajectory, currentIndex, mapReady, googlePinIcon]); // ✅ mapReady here
 
   // ---------------------------------------------------------------------------
   // Render
@@ -745,6 +797,27 @@ export default function MapView() {
         ))}
       </div>
 
+      {/* Image location badge (advanced mode) */}
+      {mode === "advanced" && activeImage && (
+        <button
+          type="button"
+          onClick={copyActiveImageCoords}
+          title="Copy image coordinates"
+          className="absolute top-3 left-3 z-[570] rounded-lg border border-cyan-400/30 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-sm text-left hover:border-cyan-300/60"
+        >
+          <div className="flex items-center gap-2 text-cyan-300 font-semibold uppercase tracking-wide">
+            <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+            Image Location
+          </div>
+          <div className="mt-1 text-slate-200">
+            Lat {activeImage.lat.toFixed(5)} · Lon {activeImage.lon.toFixed(5)}
+          </div>
+          <div className="mt-1 text-[11px] text-cyan-200/90">
+            {copiedCoords ? "Copied" : "Click to copy"}
+          </div>
+        </button>
+      )}
+
       {/* Pen / draw mode toggle */}
       <div className="absolute top-16 right-3 z-[560] flex items-center gap-2">
         <button
@@ -757,7 +830,6 @@ export default function MapView() {
               : "bg-black/70 text-white hover:bg-black/85"
           }`}
         >
-          {/* Pen SVG icon */}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
@@ -769,7 +841,6 @@ export default function MapView() {
           {drawMode ? "Drawing..." : "Draw Path"}
         </button>
 
-        {/* Undo Button (Only in draw mode) */}
         {drawMode && (
           <>
             <button
@@ -807,7 +878,7 @@ export default function MapView() {
         )}
       </div>
 
-      {/* Path width control (always visible in simple mode) */}
+      {/* Path width control (simple mode only) */}
       {mode === "simple" && (
         <div className="absolute top-28 right-3 z-[560] w-48 rounded-lg bg-black/70 p-2 text-xs text-white shadow-lg">
           <div className="mb-1 flex items-center justify-between">
@@ -826,7 +897,7 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Status hint at bottom */}
+      {/* Status hint (simple mode only) */}
       {mode === "simple" && (
         <div className="absolute bottom-3 left-3 z-[550] rounded-md bg-black/65 px-3 py-2 text-xs text-white">
           {drawMode
