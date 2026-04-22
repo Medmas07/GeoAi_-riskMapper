@@ -12,6 +12,22 @@ class SRTMProvider(DEMProvider):
     BASE = "https://portal.opentopography.org/API/globaldem"
 
     def fetch(self, west: float, south: float, east: float, north: float) -> DEMData:
+        # Enforce minimum bounding box size for OpenTopography (~0.05 degrees)
+        width = east - west
+        height = north - south
+        
+        min_size = 0.06
+        
+        if width < min_size:
+            pad = (min_size - width) / 2
+            west -= pad
+            east += pad
+            
+        if height < min_size:
+            pad_h = (min_size - height) / 2
+            south -= pad_h
+            north += pad_h
+
         params = {
             "demtype": "SRTMGL1",  # 30m resolution
             "west": west,

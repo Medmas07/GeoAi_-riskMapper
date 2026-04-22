@@ -22,7 +22,7 @@ class MapillaryProvider:
     """
 
     BASE = settings.MAPILLARY_API_BASE
-    FIELDS = "id,geometry,captured_at,thumb_1024_url,sequence"
+    FIELDS = "id,geometry,captured_at,thumb_1024_url,thumb_256_url,sequence"
 
     def __init__(self):
         self.token = settings.MAPILLARY_ACCESS_TOKEN
@@ -76,7 +76,7 @@ class MapillaryProvider:
                                 lon=coords[0],
                                 lat=coords[1],
                                 captured_at=datetime.fromtimestamp(captured / 1000) if captured else None,
-                                thumb_url=feat.get("thumb_1024_url"),
+                                thumb_url=feat.get("thumb_1024_url") or feat.get("thumb_256_url"),
                                 sequence_id=feat.get("sequence"),
                             )
                         )
