@@ -45,7 +45,6 @@ interface AnalysisStore {
   isPlaying: boolean;
   aoi: AOI | null;
   isRunning: boolean;
-  pathWidthMeters: number;
 
   /** Simplified freehand path the user drew; null if using legacy bbox draw */
   drawnPath: DrawnPathPoint[] | null;
@@ -62,7 +61,6 @@ interface AnalysisStore {
   setAOI: (aoi: AOI | null) => void;
   setDrawnPath: (path: DrawnPathPoint[] | null) => void;
   setMode: (mode: Mode) => void;
-  setPathWidthMeters: (meters: number) => void;
   play: () => void;
   pause: () => void;
   next: () => void;
@@ -99,7 +97,6 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   isPlaying: false,
   aoi: null,
   isRunning: false,
-  pathWidthMeters: 25,
   drawnPath: null,
 
   // Initial risk layer state
@@ -118,7 +115,6 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   setAOI: (aoi) => set({ aoi }),
   setDrawnPath: (drawnPath) => set({ drawnPath }),
   setMode: (mode) => set({ mode }),
-  setPathWidthMeters: (pathWidthMeters) => set({ pathWidthMeters }),
   play: () => set({ isPlaying: true }),
   pause: () => set({ isPlaying: false }),
 

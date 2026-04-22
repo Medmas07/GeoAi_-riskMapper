@@ -16,91 +16,45 @@ export default function Sidebar() {
   const setRiskResults = useAnalysisStore((s) => s.setRiskResults);
   const setActiveLayer = useAnalysisStore((s) => s.setActiveLayer);
   const setAOI = useAnalysisStore((s) => s.setAOI);
-  const pathWidthMeters = useAnalysisStore((s) => s.pathWidthMeters);
-  const setPathWidthMeters = useAnalysisStore((s) => s.setPathWidthMeters);
   const setData = useAnalysisStore((s) => s.setData);
 
   const hasResults = floodLayers.length > 0;
 
   const aoiLabel = useMemo(() => {
-    if (!aoi) return "No path drawn";
-    const spanLat = ((aoi.north - aoi.south) * 111).toFixed(1); // rough km
+    if (!aoi) return "No route set";
+    const spanLat = ((aoi.north - aoi.south) * 111).toFixed(1);
     const spanLon = ((aoi.east - aoi.west) * 111).toFixed(1);
     return `${spanLat} × ${spanLon} km  (${aoi.south.toFixed(4)}, ${aoi.west.toFixed(4)})`;
   }, [aoi]);
 
-  // Helper to fetch mapillary images (trying along path first, fallback to BBox logic)
-  async function fetchMapillaryImages(path: any, widthMeters: number, aoiBox: any) {
+  async function fetchMapillaryImages(path: any) {
     if (!path || path.length < 2) return [];
-    
-    // First try the strict path query
-    let sortedImgs = await api.mapillary.imagesAlongPath(path, widthMeters).catch(() => []);
-    
-    // Fallback if no images found exactly along path (like it used to do)
-    if (sortedImgs.length === 0 && aoiBox) {
-      console.log("No images along exact path, falling back to bounding box query");
-      const imgs = await api.mapillary.images(
-        aoiBox.west, aoiBox.south, aoiBox.east, aoiBox.north
-      ).catch(() => []);
-      
-      sortedImgs = imgs.length <= 1
-        ? imgs
-        : (() => {
-            const sorted = [imgs[0]];
-            const remaining = imgs.slice(1);
-
-            while (remaining.length) {
-              const last = sorted[sorted.length - 1];
-              let nearestIdx = 0;
-              let nearestDist = Infinity;
-
-              remaining.forEach((img: any, i: number) => {
-                const d = Math.hypot(img.lat - last.lat, img.lon - last.lon);
-                if (d < nearestDist) {
-                  nearestDist = d;
-                  nearestIdx = i;
-                }
-              });
-
-              sorted.push(remaining.splice(nearestIdx, 1)[0]);
-            }
-            return sorted;
-          })();
-    }
-    return sortedImgs;
+    return api.mapillary.imagesAlongPath(path).catch(() => []);
   }
 
-  // Refetch mapillary images when path width changes in advanced mode
   useEffect(() => {
     if (mode !== "advanced" || !hasResults || !drawnPath || drawnPath.length < 2) return;
-    
+
     const timeoutId = setTimeout(async () => {
       try {
-        const sortedImgs = await fetchMapillaryImages(drawnPath, pathWidthMeters, aoi);
+        const sortedImgs = await fetchMapillaryImages(drawnPath);
         setData({
           trajectory: sortedImgs.map((img: any) => ({
-            lat: img.lat,
-            lon: img.lon,
-            elevation: 0,
-            image_id: img.id,
+            lat: img.lat, lon: img.lon, elevation: 0, image_id: img.id,
           })),
           images: sortedImgs.map((img: any) => ({
-            id: img.id,
-            lat: img.lat,
-            lon: img.lon,
-            url:
-              img.thumb_url ??
-              `https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found`,
+            id: img.id, lat: img.lat, lon: img.lon,
+            url: img.thumb_url ?? `https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found`,
           })),
           profile: [],
         });
       } catch (err) {
-        console.error("Failed to refetch mapillary images on width change:", err);
+        console.error("Failed to refetch Mapillary images for current path:", err);
       }
     }, 400);
 
     return () => clearTimeout(timeoutId);
-  }, [pathWidthMeters, mode, hasResults, drawnPath, aoi, setData]);
+  }, [mode, hasResults, drawnPath, setData]);
 
   async function onRunAnalysis() {
     if (isRunning || !aoi) return;
@@ -115,32 +69,21 @@ export default function Sidebar() {
       if (result.status === "completed") {
         setRiskResults(result.flood_layers, result.heat_layers);
 
-        const sortedImgs = await fetchMapillaryImages(drawnPath, pathWidthMeters, aoi);
-
-        console.log("flood layers:", result.flood_layers.length);
+        const sortedImgs = await fetchMapillaryImages(drawnPath);
+        console.log("[Mapillary] images fetched along path:", sortedImgs.length);
 
         setData({
           trajectory: sortedImgs.map((img: any) => ({
-            lat: img.lat,
-            lon: img.lon,
-            elevation: 0,
-            image_id: img.id,
+            lat: img.lat, lon: img.lon, elevation: 0, image_id: img.id,
           })),
           images: sortedImgs.map((img: any) => ({
-            id: img.id,
-            lat: img.lat,
-            lon: img.lon,
-            url:
-              img.thumb_url ??
-              `https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found`,
+            id: img.id, lat: img.lat, lon: img.lon,
+            url: img.thumb_url ?? `https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found`,
           })),
           profile: [],
         });
 
-        console.log("switching to advanced mode");
         setMode("advanced");
-
-        // Force map re-fit after mode switch
         const currentAoi = aoi;
         setAOI(null);
         setTimeout(() => setAOI(currentAoi), 50);
@@ -164,56 +107,20 @@ export default function Sidebar() {
     >
       <div>
         <h1 className="text-lg font-semibold leading-tight">GeoAI Risk Mapper</h1>
-        <p
-          className={`text-xs mt-1 ${
-            mode === "simple" ? "text-slate-600" : "text-slate-400"
-          }`}
-        >
+        <p className={`text-xs mt-1 ${mode === "simple" ? "text-slate-600" : "text-slate-400"}`}>
           Flood & Heat Risk Analysis
         </p>
       </div>
 
       {/* AOI summary */}
-      <div
-        className={`text-xs rounded-md p-2 ${
-          mode === "simple"
-            ? "bg-slate-100 text-slate-700"
-            : "bg-slate-900 text-slate-300"
-        }`}
-      >
+      <div className={`text-xs rounded-md p-2 ${mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-300"}`}>
         <span className="font-semibold">AOI: </span>
         {aoiLabel}
         {drawnPath && drawnPath.length >= 2 && (
-          <span
-            className={`ml-1 ${
-              mode === "simple" ? "text-cyan-600" : "text-cyan-400"
-            }`}
-          >
+          <span className={`ml-1 ${mode === "simple" ? "text-cyan-600" : "text-cyan-400"}`}>
             ({drawnPath.length} pts)
           </span>
         )}
-      </div>
-
-      <div
-        className={`text-xs rounded-md p-2 ${
-          mode === "simple"
-            ? "bg-slate-100 text-slate-700"
-            : "bg-slate-900 text-slate-300"
-        }`}
-      >
-        <div className="mb-1 flex items-center justify-between">
-          <span className="font-semibold">Line Width</span>
-          <span>{pathWidthMeters} m</span>
-        </div>
-        <input
-          type="range"
-          min={5}
-          max={120}
-          step={5}
-          value={pathWidthMeters}
-          onChange={(e) => setPathWidthMeters(Number(e.target.value))}
-          className="w-full accent-cyan-500"
-        />
       </div>
 
       <button
@@ -226,27 +133,20 @@ export default function Sidebar() {
             : "bg-cyan-500 text-black hover:bg-cyan-400"
         }`}
       >
-        {isRunning ? "Analyzing…" : !aoi ? "Draw a path first" : "Run Analysis"}
+        {isRunning ? "Analyzing…" : !aoi ? "Set a route first" : "Run Analysis"}
       </button>
 
       {hasResults && (
-        <div
-          className={`rounded-md p-3 ${
-            mode === "simple" ? "bg-slate-100" : "bg-slate-900"
-          } space-y-2`}
-        >
+        <div className={`rounded-md p-3 ${mode === "simple" ? "bg-slate-100" : "bg-slate-900"} space-y-2`}>
           <p className="text-xs font-semibold">Risk Layer</p>
           <div className="flex gap-2">
             {(["flood", "heat"] as const).map((layer) => (
               <button
-                key={layer}
-                type="button"
+                key={layer} type="button"
                 onClick={() => setActiveLayer(layer)}
                 className={`flex-1 rounded px-2 py-1 text-xs font-semibold capitalize ${
                   activeLayer === layer
-                    ? layer === "flood"
-                      ? "bg-blue-500 text-white"
-                      : "bg-orange-500 text-white"
+                    ? layer === "flood" ? "bg-blue-500 text-white" : "bg-orange-500 text-white"
                     : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                 }`}
               >
@@ -262,10 +162,7 @@ export default function Sidebar() {
               { color: "#f44336", label: "Extreme" },
             ].map(({ color, label }) => (
               <div key={label} className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 rounded-sm inline-block"
-                  style={{ background: color }}
-                />
+                <span className="w-3 h-3 rounded-sm inline-block" style={{ background: color }} />
                 {label}
               </div>
             ))}
@@ -274,13 +171,8 @@ export default function Sidebar() {
       )}
 
       {!hasResults && !isRunning && (
-        <div
-          className={`mt-auto text-xs ${
-            mode === "simple" ? "text-slate-600" : "text-slate-400"
-          }`}
-        >
-          Click <strong>Draw Path</strong> on the map, place points along the road,
-          then hit <strong>Run Analysis</strong>.
+        <div className={`mt-auto text-xs ${mode === "simple" ? "text-slate-600" : "text-slate-400"}`}>
+          Use <strong>Route Path</strong> on the map to set a route, then hit <strong>Run Analysis</strong>.
         </div>
       )}
     </aside>

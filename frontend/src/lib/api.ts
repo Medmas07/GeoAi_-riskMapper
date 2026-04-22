@@ -41,13 +41,10 @@ export const api = {
       request<MapillaryImage[]>(
         `/mapillary/images?west=${west}&south=${south}&east=${east}&north=${north}`
       ),
-    imagesAlongPath: (path: DrawnPathPoint[], widthMeters: number) =>
+    imagesAlongPath: (path: DrawnPathPoint[]) =>
       request<MapillaryImage[]>("/mapillary/images/along-path", {
         method: "POST",
-        body: JSON.stringify({
-          path,
-          width_meters: widthMeters,
-        }),
+        body: JSON.stringify({ path }),
       }),
   },
 

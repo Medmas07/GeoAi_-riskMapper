@@ -7,6 +7,8 @@ from app.data_providers.imagery.mapillary import MapillaryProvider, MapillaryIma
 router = APIRouter(prefix="/mapillary", tags=["mapillary"])
 
 
+# ── Response / Request models ────────────────────────────────────────────────
+
 class ImageResponse(BaseModel):
     id: str
     lat: float
@@ -22,52 +24,109 @@ class PathPoint(BaseModel):
 
 class ImagesAlongPathRequest(BaseModel):
     path: list[PathPoint] = Field(min_length=2)
-    width_meters: float = Field(default=25.0, ge=5.0, le=200.0)
-    per_segment_limit: int = Field(default=120, ge=20, le=500)
+    # Tight search radius around each road coordinate — default 20 m.
+    # This replaces the old "width_meters" corridor concept entirely.
+    # 20 m covers the road width + additional GPS drift tolerance.
+    search_radius_meters: float = Field(default=20.0, ge=5.0, le=50.0)
+    # How densely to sample the path (every N metres place a probe point).
+    # OSRM routes can have hundreds of coords already; we subsample to avoid
+    # hammering the Mapillary API with redundant bbox calls.
+    sample_every_meters: float = Field(default=15.0, ge=5.0, le=100.0)
 
 
-def _meters_per_degree_lat() -> float:
-    return 111_320.0
+# ── Geo helpers ──────────────────────────────────────────────────────────────
+
+_METERS_PER_DEG_LAT = 111_320.0
 
 
-def _meters_per_degree_lon(lat: float) -> float:
-    return 111_320.0 * math.cos(math.radians(lat))
+def _meters_per_deg_lon(lat: float) -> float:
+    return _METERS_PER_DEG_LAT * math.cos(math.radians(lat))
 
 
-def _segment_length_m(a: PathPoint, b: PathPoint) -> float:
+def _distance_m(a: PathPoint, b: PathPoint) -> float:
     mid_lat = (a.lat + b.lat) / 2.0
-    dx = (b.lon - a.lon) * _meters_per_degree_lon(mid_lat)
-    dy = (b.lat - a.lat) * _meters_per_degree_lat()
+    dx = (b.lon - a.lon) * _meters_per_deg_lon(mid_lat)
+    dy = (b.lat - a.lat) * _METERS_PER_DEG_LAT
     return math.hypot(dx, dy)
 
 
-def _project_point_on_segment(lat: float, lon: float, a: PathPoint, b: PathPoint):
-    mid_lat = (a.lat + b.lat) / 2.0
-    mx = _meters_per_degree_lon(mid_lat)
-    my = _meters_per_degree_lat()
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Accurate point-to-point distance in metres."""
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    ax = a.lon * mx
-    ay = a.lat * my
-    bx = b.lon * mx
-    by = b.lat * my
-    px = lon * mx
-    py = lat * my
 
-    abx = bx - ax
-    aby = by - ay
-    apx = px - ax
-    apy = py - ay
-    denom = abx * abx + aby * aby
+def _closest_distance_to_path(img_lat: float, img_lon: float, path: list[PathPoint]) -> float:
+    """
+    Returns the minimum perpendicular distance (metres) from the image
+    to any segment of the path.  Used for final strict filtering.
+    """
+    best = float("inf")
+    for i in range(len(path) - 1):
+        a = path[i]
+        b = path[i + 1]
+        mid_lat = (a.lat + b.lat) / 2.0
+        mx = _meters_per_deg_lon(mid_lat)
+        my = _METERS_PER_DEG_LAT
 
-    if denom == 0:
-        return 0.0, math.hypot(apx, apy)
+        ax, ay = a.lon * mx, a.lat * my
+        bx, by = b.lon * mx, b.lat * my
+        px, py = img_lon * mx, img_lat * my
 
-    t_raw = (apx * abx + apy * aby) / denom
-    t = max(0.0, min(1.0, t_raw))
-    qx = ax + t * abx
-    qy = ay + t * aby
-    return t, math.hypot(px - qx, py - qy)
+        abx, aby = bx - ax, by - ay
+        apx, apy = px - ax, py - ay
+        denom = abx * abx + aby * aby
 
+        if denom == 0:
+            dist = math.hypot(apx, apy)
+        else:
+            t = max(0.0, min(1.0, (apx * abx + apy * aby) / denom))
+            qx = ax + t * abx
+            qy = ay + t * aby
+            dist = math.hypot(px - qx, py - qy)
+
+        if dist < best:
+            best = dist
+
+    return best
+
+
+def _subsample_path(path: list[PathPoint], every_m: float) -> list[PathPoint]:
+    """
+    Return a list of probe points spaced ~every_m metres along the path.
+    Always includes the first and last point.
+    """
+    if len(path) < 2:
+        return path
+
+    probes: list[PathPoint] = [path[0]]
+    accumulated = 0.0
+
+    for i in range(1, len(path)):
+        seg_len = _distance_m(path[i - 1], path[i])
+        accumulated += seg_len
+        if accumulated >= every_m:
+            probes.append(path[i])
+            accumulated = 0.0
+
+    if probes[-1] != path[-1]:
+        probes.append(path[-1])
+
+    return probes
+
+
+def _bbox_for_point(lat: float, lon: float, radius_m: float):
+    """Square bbox centred on (lat, lon) with half-side = radius_m."""
+    lat_pad = radius_m / _METERS_PER_DEG_LAT
+    lon_pad = radius_m / max(_meters_per_deg_lon(lat), 1.0)
+    return lon - lon_pad, lat - lat_pad, lon + lon_pad, lat + lat_pad
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/images", response_model=list[ImageResponse])
 async def get_images(
@@ -96,81 +155,103 @@ async def get_images(
 
 @router.post("/images/along-path", response_model=list[ImageResponse])
 async def get_images_along_path(req: ImagesAlongPathRequest):
+    """
+    Fetch Mapillary images along a road-snapped path.
+
+    Strategy (replaces the old bbox-corridor approach):
+
+    1. Subsample the path every `sample_every_meters` metres to get probe points.
+    2. For each probe, fetch images inside a tiny square bbox of radius
+       `search_radius_meters` (~15 m).  This is tight enough to exclude
+       buildings on the other side of the pavement.
+    3. Deduplicate across all probes.
+    4. Final strict filter: keep only images whose perpendicular distance to
+       the path is ≤ search_radius_meters (eliminates corner bleed).
+    5. Sort by progress along the path, then thin so consecutive images are
+       at least min_spacing_m apart.
+    """
     try:
         provider = MapillaryProvider()
-
         path = req.path
-        width_m = req.width_meters
+        radius = req.search_radius_meters
 
+        # 1. Subsample
+        probes = _subsample_path(path, req.sample_every_meters)
+
+        # 2. Fetch per probe
         seen: set[str] = set()
         candidates: list[MapillaryImage] = []
+        strict: list[tuple[MapillaryImage, float]] = []
+        filtered: list[MapillaryImage] = []
 
-        for i in range(len(path) - 1):
-            a = path[i]
-            b = path[i + 1]
-
-            mid_lat = (a.lat + b.lat) / 2.0
-            lat_pad = width_m / _meters_per_degree_lat()
-            lon_div = max(_meters_per_degree_lon(mid_lat), 1.0)
-            lon_pad = width_m / lon_div
-
-            west = min(a.lon, b.lon) - lon_pad
-            east = max(a.lon, b.lon) + lon_pad
-            south = min(a.lat, b.lat) - lat_pad
-            north = max(a.lat, b.lat) + lat_pad
-
-            segment_imgs = provider.fetch_images_by_bbox(
-                west,
-                south,
-                east,
-                north,
-                limit=req.per_segment_limit,
-            )
-
-            for img in segment_imgs:
-                if img.id in seen:
-                    continue
-                seen.add(img.id)
-                candidates.append(img)
+        for probe in probes:
+            west, south, east, north = _bbox_for_point(probe.lat, probe.lon, radius)
+            imgs = provider.fetch_images_by_bbox(west, south, east, north, limit=50)
+            for img in imgs:
+                if img.id not in seen:
+                    seen.add(img.id)
+                    candidates.append(img)
 
         if not candidates:
+            print(f"[Mapillary] probes={len(probes)} candidates={len(candidates)} strict={len(strict)} final={len(filtered)}")
             return []
 
+        # 3. Strict perpendicular-distance filter
+        for img in candidates:
+            dist = _closest_distance_to_path(img.lat, img.lon, path)
+            if dist <= radius:
+                strict.append((img, dist))
+
+        if not strict:
+            print(f"[Mapillary] probes={len(probes)} candidates={len(candidates)} strict={len(strict)} final={len(filtered)}")
+            return []
+
+        # 4. Compute progress along path for sorting
         cumulative = [0.0]
         for i in range(1, len(path)):
-            cumulative.append(cumulative[i - 1] + _segment_length_m(path[i - 1], path[i]))
+            cumulative.append(cumulative[i - 1] + _distance_m(path[i - 1], path[i]))
+        total_length = cumulative[-1]
 
-        scored = []
-        for img in candidates:
-            best_distance = float("inf")
-            best_progress = 0.0
-
+        def _progress(img: MapillaryImage) -> float:
+            best_prog = 0.0
+            best_dist = float("inf")
             for i in range(len(path) - 1):
                 a = path[i]
                 b = path[i + 1]
-                t, distance_m = _project_point_on_segment(img.lat, img.lon, a, b)
-                seg_len = _segment_length_m(a, b)
-                progress = cumulative[i] + t * seg_len
-                if distance_m < best_distance:
-                    best_distance = distance_m
-                    best_progress = progress
+                mid_lat = (a.lat + b.lat) / 2.0
+                mx = _meters_per_deg_lon(mid_lat)
+                my = _METERS_PER_DEG_LAT
+                ax, ay = a.lon * mx, a.lat * my
+                bx, by = b.lon * mx, b.lat * my
+                px, py = img.lon * mx, img.lat * my
+                abx, aby = bx - ax, by - ay
+                apx, apy = px - ax, py - ay
+                denom = abx * abx + aby * aby
+                if denom == 0:
+                    t, d = 0.0, math.hypot(apx, apy)
+                else:
+                    t = max(0.0, min(1.0, (apx * abx + apy * aby) / denom))
+                    qx, qy = ax + t * abx, ay + t * aby
+                    d = math.hypot(px - qx, py - qy)
+                seg_len = _distance_m(a, b)
+                prog = cumulative[i] + t * seg_len
+                if d < best_dist:
+                    best_dist = d
+                    best_prog = prog
+            return best_prog
 
-            if best_distance <= width_m:
-                scored.append((img, best_progress, best_distance))
+        scored = [(img, _progress(img)) for img, _ in strict]
+        scored.sort(key=lambda x: x[1])
 
-        if not scored:
-            return []
+        # 5. Thin: keep images at least min_spacing apart
+        min_spacing = max(8.0, total_length / 300)
+        last_prog = -1e12
+        for img, prog in scored:
+            if prog - last_prog >= min_spacing:
+                filtered.append(img)
+                last_prog = prog
 
-        scored.sort(key=lambda x: (x[1], x[2]))
-
-        min_spacing_m = max(5.0, min(20.0, width_m * 0.4))
-        filtered: list[tuple[MapillaryImage, float, float]] = []
-        last_progress = -1e12
-        for item in scored:
-            progress = item[1]
-            if progress - last_progress >= min_spacing_m:
-                filtered.append(item)
-                last_progress = progress
+        print(f"[Mapillary] probes={len(probes)} candidates={len(candidates)} strict={len(strict)} final={len(filtered)}")
 
         return [
             ImageResponse(
@@ -180,7 +261,8 @@ async def get_images_along_path(req: ImagesAlongPathRequest):
                 thumb_url=img.thumb_url,
                 captured_at=img.captured_at.isoformat() if img.captured_at else None,
             )
-            for img, _, _ in filtered
+            for img in filtered
         ]
+
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Mapillary path error: {e}")

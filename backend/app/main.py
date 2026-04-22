@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import analysis, mapillary, weather
+from app.api.routes import analysis, mapillary, weather, routing
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -26,7 +26,7 @@ app.add_middleware(
 app.include_router(analysis.router, prefix=settings.API_V1_PREFIX)
 app.include_router(mapillary.router, prefix=settings.API_V1_PREFIX)
 app.include_router(weather.router, prefix=settings.API_V1_PREFIX)
-
+app.include_router(routing.router, prefix=settings.API_V1_PREFIX)
 
 @app.get("/health")
 async def health():
