@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings
 from typing import Literal
+from pathlib import Path
+
+
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
@@ -20,6 +24,12 @@ class Settings(BaseSettings):
     MAPILLARY_ACCESS_TOKEN: str = ""
     MAPILLARY_API_BASE: str = "https://graph.mapillary.com"
 
+    # Elevation providers
+    ORS_API_KEY: str = ""
+    GEONAMES_USERNAME: str = ""
+    ELEVATION_OPENTOPODATA_DATASET: str = "srtm90m"
+    ELEVATION_OPENTOPOGRAPHY_DEMTYPE: str = "SRTMGL1"
+
     # Weather
     WEATHER_PROVIDER: Literal["open_meteo", "openweather"] = "open_meteo"
     OPENWEATHER_API_KEY: str = ""
@@ -37,7 +47,7 @@ class Settings(BaseSettings):
     OPENTOPOGRAPHY_API_KEY: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE)
         case_sensitive = True
         # Allow branch-specific env vars that may not be used by this branch.
         extra = "ignore"

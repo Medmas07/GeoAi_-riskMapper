@@ -1,10 +1,29 @@
-import type { AnalysisRequest, AnalysisResult, MapillaryImage } from "@/types";
+
 import type { DrawnPathPoint } from "@/store/analysis";
+import type {
+  AnalysisRequest,
+  AnalysisResult,
+  ElevationProfileOptionsResponse,
+  ElevationProfileRequest,
+  ElevationProfileResponse,
+  MapillaryImage,
+} from "@/types";
+
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+const ROOT = BASE.replace(/\/api\/v1\/?$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+async function requestRoot<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${ROOT}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -54,5 +73,15 @@ export const api = {
   weather: {
     get: (lat: number, lon: number, daysBack = 7) =>
       request(`/weather?lat=${lat}&lon=${lon}&days_back=${daysBack}`),
+  },
+
+  elevation: {
+    options: () => requestRoot<ElevationProfileOptionsResponse>("/profile/options"),
+
+    profile: (body: ElevationProfileRequest) =>
+      requestRoot<ElevationProfileResponse>("/profile", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   },
 };
