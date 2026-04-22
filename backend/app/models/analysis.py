@@ -75,7 +75,7 @@ class AnalysisRun(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     aoi_id = Column(UUID(as_uuid=True), ForeignKey("areas_of_interest.id"))
-    status = Column(SAEnum(AnalysisStatus), default=AnalysisStatus.pending)
+    status = Column(SAEnum(AnalysisStatus, name="analysis_status"), default=AnalysisStatus.pending)    
     simulation_engine = Column(String, default="null")
     config_snapshot = Column(JSONB)
     created_at = Column(DateTime, default=datetime.utcnow)

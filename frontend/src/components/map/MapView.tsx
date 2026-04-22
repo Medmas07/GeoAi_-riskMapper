@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useAnalysisStore, type TrajectoryPoint } from "@/store/analysis";
+import { RISK_COLORS, type RiskCategory } from "@/types";
 
 type Basemap = "osm" | "satellite" | "terrain";
 
@@ -44,6 +45,10 @@ export default function MapView() {
   const setIndex = useAnalysisStore((s) => s.setIndex);
   const aoi = useAnalysisStore((s) => s.aoi);
   const setAOI = useAnalysisStore((s) => s.setAOI);
+  
+  const floodLayers = useAnalysisStore((s) => s.floodLayers);
+  const heatLayers = useAnalysisStore((s) => s.heatLayers);
+  const activeLayer = useAnalysisStore((s) => s.activeLayer);
 
   const mapRef = useRef<L.Map | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
@@ -51,6 +56,7 @@ export default function MapView() {
   const markerRef = useRef<L.CircleMarker | null>(null);
   const aoiRectRef = useRef<L.Rectangle | null>(null);
   const previewRectRef = useRef<L.Rectangle | null>(null);
+  const riskLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const drawStartRef = useRef<L.LatLng | null>(null);
   const isDrawingRef = useRef(false);
   const pointsRef = useRef<TrajectoryPoint[]>([]);
@@ -67,8 +73,8 @@ export default function MapView() {
 
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
-      preferCanvas: true,
-    }).setView([36.75, 3.06], 6);
+      preferCanvas: false,
+    }).setView([36.83, 10.15], 11);
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
@@ -162,6 +168,32 @@ export default function MapView() {
       map.fitBounds(bounds, { padding: [32, 32] });
     }
   }, [aoi, mode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (riskLayerGroupRef.current) {
+      riskLayerGroupRef.current.clearLayers();
+    } else {
+      riskLayerGroupRef.current = L.layerGroup().addTo(map);
+    }
+
+    const layers = activeLayer === "flood" ? floodLayers : heatLayers;
+
+    for (const layer of layers) {
+      const category = (layer.components.category ?? 1) as RiskCategory;
+      const color = RISK_COLORS[category];
+
+      if (color === "transparent") continue;
+
+      L.geoJSON(layer.geometry as unknown as GeoJSON.GeoJsonObject, {
+        style: { color, fillColor: color, fillOpacity: 0.5, weight: 0 },
+      })
+        .bindPopup(`<b>${activeLayer} risk</b><br>Score: ${layer.score.toFixed(2)}`)
+        .addTo(riskLayerGroupRef.current!);
+    }
+  }, [floodLayers, heatLayers, activeLayer]);
 
   useEffect(() => {
     const map = mapRef.current;

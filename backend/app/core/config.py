@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # CV Model
     CV_MODEL: Literal["clip", "resnet", "mock"] = "clip"
+    OPENTOPOGRAPHY_API_KEY: str = ""
 
     class Config:
         env_file = ".env"

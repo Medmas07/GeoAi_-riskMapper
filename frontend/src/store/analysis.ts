@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { RiskLayer } from "@/types";
 
 export type Mode = "simple" | "advanced";
 
@@ -38,6 +39,11 @@ interface AnalysisStore {
   isPlaying: boolean;
   aoi: AOI | null;
   isRunning: boolean;
+  
+  // Risk layer state
+  floodLayers: RiskLayer[];
+  heatLayers: RiskLayer[];
+  activeLayer: "flood" | "heat";
 
   setIndex: (index: number) => void;
   setAOI: (aoi: AOI | null) => void;
@@ -52,6 +58,10 @@ interface AnalysisStore {
     profile: ProfilePoint[];
   }) => void;
   setRunning: (running: boolean) => void;
+  
+  // Risk layer setters
+  setRiskResults: (flood: RiskLayer[], heat: RiskLayer[]) => void;
+  setActiveLayer: (layer: "flood" | "heat") => void;
 }
 
 function clampIndex(index: number, len: number) {
@@ -70,6 +80,11 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   isPlaying: false,
   aoi: null,
   isRunning: false,
+  
+  // Initial risk layer state
+  floodLayers: [],
+  heatLayers: [],
+  activeLayer: "flood",
 
   setIndex: (index) =>
     set((state) => ({
@@ -106,6 +121,10 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
     }),
 
   setRunning: (isRunning) => set({ isRunning }),
+  
+  // Implementation of risk layer setters
+  setRiskResults: (flood, heat) => set({ floodLayers: flood, heatLayers: heat }),
+  setActiveLayer: (layer) => set({ activeLayer: layer }),
 }));
 
 export function currentImageFromStore() {

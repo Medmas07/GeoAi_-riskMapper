@@ -1,7 +1,7 @@
 import numpy as np
 import httpx
 from app.data_providers.dem.base import DEMProvider, DEMData
-
+from app.core.config import settings
 
 class SRTMProvider(DEMProvider):
     """
@@ -19,6 +19,7 @@ class SRTMProvider(DEMProvider):
             "east": east,
             "north": north,
             "outputFormat": "AAIGrid",  # ASCII Grid — easy to parse
+            "API_Key": settings.OPENTOPOGRAPHY_API_KEY,  
         }
 
         with httpx.Client(timeout=60) as client:
