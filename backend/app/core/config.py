@@ -39,6 +39,21 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        # Allow branch-specific env vars that may not be used by this branch.
+        extra = "ignore"
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # Prefer project-local .env values over machine-wide env vars
+        # to avoid collisions (e.g. system DEBUG=release).
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
 
 settings = Settings()
