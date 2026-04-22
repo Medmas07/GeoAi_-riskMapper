@@ -5,6 +5,7 @@ import Sidebar from "@/components/analysis/Sidebar";
 import ImageViewer from "@/components/analysis/ImageViewer";
 import ProfileChart from "@/components/analysis/ProfileChart";
 import { useAnalysisStore } from "@/store/analysis";
+import SearchBar from "@/components/map/SearchBar"; // 👈 Added import
 
 const MapView = dynamic(() => import("@/components/map/MapView"), { ssr: false });
 
@@ -18,6 +19,10 @@ export default function Home() {
         <div className="absolute left-4 top-4 z-[700] w-[280px]">
           <Sidebar />
         </div>
+        {/* 👇 Added SearchBar - centered top */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[700]">
+          <SearchBar />
+        </div>
       </main>
     );
   }
@@ -30,8 +35,12 @@ export default function Home() {
       <div className="border-b border-r border-slate-800 min-w-0 min-h-0">
         <ImageViewer />
       </div>
-      <div className="border-b border-slate-800 min-w-0 min-h-0">
+      {/* 👇 Replaced map div with relative wrapper + SearchBar overlay */}
+      <div className="border-b border-slate-800 min-w-0 min-h-0 relative">
         <MapView />
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[700]">
+          <SearchBar />
+        </div>
       </div>
       <div className="col-span-2 min-w-0 min-h-0">
         <ProfileChart />
