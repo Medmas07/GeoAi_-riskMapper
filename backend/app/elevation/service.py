@@ -18,7 +18,7 @@ from app.elevation.providers.opentopography import OpenTopographyProvider
 from app.elevation.providers.ors import ORSProvider
 from app.elevation.utils import Coordinate, compute_profile, validate_line
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 ProviderName = str
 
@@ -42,6 +42,13 @@ class ElevationService:
             provider=provider,
             dataset=dataset,
             use_fallback=use_fallback,
+        )
+        logger.info(
+            "Elevation profile request: provider=%s dataset=%s fallback=%s chain=%s",
+            provider or "default",
+            dataset or "default",
+            use_fallback,
+            [p.name for p in providers],
         )
 
         for provider_impl in providers:

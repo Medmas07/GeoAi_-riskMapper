@@ -10,7 +10,8 @@ from app.elevation.utils import Coordinate
 class OpenElevationProvider(PointElevationProvider):
     name = "open-elevation"
     endpoint = "https://api.open-elevation.com/api/v1/lookup"
-    chunk_size = 100
+    # Keep URL length safe for GET requests.
+    chunk_size = 20
 
     async def _fetch_points(self, sampled_line: list[Coordinate]) -> list[float]:
         deadline = monotonic() + self.timeout_budget_s
@@ -39,4 +40,3 @@ class OpenElevationProvider(PointElevationProvider):
                     elevations.append(float(elevation))
 
         return elevations
-

@@ -178,10 +178,14 @@ export default function Sidebar() {
             line: sortedImages.map((img) => [img.lon, img.lat] as [number, number]),
             use_fallback: true,
           });
+          console.info(
+            `[elevation] provider=${elevation.provider} dataset=${elevation.dataset ?? "default"} points=${elevation.points.length}`
+          );
           const built = buildTrajectoryAndProfileFromElevation(sortedImages, elevation);
           trajectory = built.trajectory;
           profile = built.profile;
-        } catch {
+        } catch (error) {
+          console.warn("[elevation] profile API failed, using flat fallback profile", error);
           const built = buildFlatTrajectoryAndProfile(sortedImages);
           trajectory = built.trajectory;
           profile = built.profile;

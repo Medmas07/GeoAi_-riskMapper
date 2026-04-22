@@ -11,7 +11,8 @@ from app.elevation.utils import Coordinate
 class OpenTopoDataProvider(PointElevationProvider):
     name = "opentopodata"
     base_endpoint = "https://api.opentopodata.org/v1"
-    chunk_size = 100
+    # Keep URL length safe for GET requests.
+    chunk_size = 20
 
     def __init__(self, dataset: str = "srtm30m"):
         self.dataset = normalize_opentopodata_dataset(dataset)
