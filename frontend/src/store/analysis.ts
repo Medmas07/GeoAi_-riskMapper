@@ -54,6 +54,8 @@ interface AnalysisStore {
   floodLayers: RiskLayer[];
   heatLayers: RiskLayer[];
   activeLayer: "flood" | "heat";
+  lastAnalyzedBbox: AOI | null;
+  lastAnalysisDurationSeconds: number | null;
   
   // FlyTo state
   flyToTarget: { lat: number; lon: number; zoom: number } | null;
@@ -77,6 +79,7 @@ interface AnalysisStore {
   // Risk layer setters
   setRiskResults: (flood: RiskLayer[], heat: RiskLayer[]) => void;
   setActiveLayer: (layer: "flood" | "heat") => void;
+  setLastAnalysisDurationSeconds: (seconds: number | null) => void;
   
   // FlyTo setters
   flyTo: (target: { lat: number; lon: number; zoom: number }) => void;
@@ -106,6 +109,8 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   floodLayers: [],
   heatLayers: [],
   activeLayer: "flood",
+  lastAnalyzedBbox: null,
+  lastAnalysisDurationSeconds: null,
   
   // Initial FlyTo state
   flyToTarget: null,
@@ -149,8 +154,11 @@ export const useAnalysisStore = create<AnalysisStore>((set, get) => ({
   setRunning: (isRunning) => set({ isRunning }),
 
   // Implementation of risk layer setters
-  setRiskResults: (flood, heat) => set({ floodLayers: flood, heatLayers: heat }),
+  setRiskResults: (flood, heat) =>
+    set({ floodLayers: flood, heatLayers: heat, lastAnalyzedBbox: get().aoi }),
   setActiveLayer: (layer) => set({ activeLayer: layer }),
+  setLastAnalysisDurationSeconds: (lastAnalysisDurationSeconds) =>
+    set({ lastAnalysisDurationSeconds }),
   
   // Implementation of FlyTo setters
   flyTo: (target) => set({ flyToTarget: target }),

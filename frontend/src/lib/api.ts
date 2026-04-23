@@ -12,6 +12,19 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 const ROOT = BASE.replace(/\/api\/v1\/?$/, "");
+const _imageCache = new Map<string, MapillaryImage[]>();
+
+export function clearImageCache() {
+  _imageCache.clear();
+}
+
+function pathCacheKey(path: DrawnPathPoint[], radius: number) {
+  return JSON.stringify({ path, radius });
+}
+
+function bboxCacheKey(west: number, south: number, east: number, north: number) {
+  return JSON.stringify({ west, south, east, north });
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -57,17 +70,34 @@ export const api = {
 
   mapillary: {
     images: (west: number, south: number, east: number, north: number) =>
-      request<MapillaryImage[]>(
-        `/mapillary/images?west=${west}&south=${south}&east=${east}&north=${north}`
-      ),
-    imagesAlongPath: (path: DrawnPathPoint[], widthMeters: number) =>
-      request<MapillaryImage[]>("/mapillary/images/along-path", {
+      {
+        const key = bboxCacheKey(west, south, east, north);
+        const cached = _imageCache.get(key);
+        if (cached) return Promise.resolve(cached);
+
+        return request<MapillaryImage[]>(
+          `/mapillary/images?west=${west}&south=${south}&east=${east}&north=${north}`
+        ).then((result) => {
+          _imageCache.set(key, result);
+          return result;
+        });
+      },
+    imagesAlongPath: (path: DrawnPathPoint[], widthMeters: number) => {
+      const key = pathCacheKey(path, widthMeters);
+      const cached = _imageCache.get(key);
+      if (cached) return Promise.resolve(cached);
+
+      return request<MapillaryImage[]>('/mapillary/images/along-path', {
         method: "POST",
         body: JSON.stringify({
           path,
           width_meters: widthMeters,
         }),
-      }),
+      }).then((result) => {
+        _imageCache.set(key, result);
+        return result;
+      });
+    },
   },
 
   weather: {

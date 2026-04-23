@@ -1,8 +1,12 @@
+import asyncio
+import json
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 import math
+from datetime import datetime
 from app.data_providers.imagery.mapillary import MapillaryProvider, MapillaryImage
+from app.core.redis import get_redis
 
 router = APIRouter(prefix="/mapillary", tags=["mapillary"])
 
@@ -126,6 +130,55 @@ def _bbox_for_point(lat: float, lon: float, radius_m: float):
     return lon - lon_pad, lat - lat_pad, lon + lon_pad, lat + lat_pad
 
 
+async def _fetch_probe(provider: MapillaryProvider, probe: PathPoint, radius: float):
+    redis = await get_redis()
+    probe_key = f"mapillary:probe:{round(probe.lat,3)}:{round(probe.lon,3)}:{round(radius)}"
+
+    if redis is not None:
+        try:
+            cached = await redis.get(probe_key)
+            if cached:
+                cached_items = json.loads(cached)
+                return [
+                    MapillaryImage(
+                        id=item["id"],
+                        lat=float(item["lat"]),
+                        lon=float(item["lon"]),
+                        captured_at=datetime.fromisoformat(item["captured_at"]) if item.get("captured_at") else None,
+                        thumb_url=item.get("thumb_url"),
+                        sequence_id=item.get("sequence_id"),
+                    )
+                    for item in cached_items
+                ]
+        except Exception:
+            pass
+
+    west, south, east, north = _bbox_for_point(probe.lat, probe.lon, radius)
+    images = await asyncio.to_thread(
+        provider.fetch_images_by_bbox, west, south, east, north, 50
+    )
+    if redis is not None:
+        try:
+            await redis.set(
+                probe_key,
+                json.dumps([
+                    {
+                        "id": image.id,
+                        "lat": image.lat,
+                        "lon": image.lon,
+                        "captured_at": image.captured_at.isoformat() if image.captured_at else None,
+                        "thumb_url": image.thumb_url,
+                        "sequence_id": image.sequence_id,
+                    }
+                    for image in images
+                ]),
+                ex=86_400,
+            )
+        except Exception:
+            pass
+    return images
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/images", response_model=list[ImageResponse])
@@ -178,15 +231,17 @@ async def get_images_along_path(req: ImagesAlongPathRequest):
         # 1. Subsample
         probes = _subsample_path(path, req.sample_every_meters)
 
-        # 2. Fetch per probe
+        # 2. Fetch per probe concurrently
+        results = await asyncio.gather(*[
+            _fetch_probe(provider, probe, radius) for probe in probes
+        ])
+
         seen: set[str] = set()
         candidates: list[MapillaryImage] = []
         strict: list[tuple[MapillaryImage, float]] = []
         filtered: list[MapillaryImage] = []
 
-        for probe in probes:
-            west, south, east, north = _bbox_for_point(probe.lat, probe.lon, radius)
-            imgs = provider.fetch_images_by_bbox(west, south, east, north, limit=50)
+        for imgs in results:
             for img in imgs:
                 if img.id not in seen:
                     seen.add(img.id)
@@ -253,7 +308,7 @@ async def get_images_along_path(req: ImagesAlongPathRequest):
 
         print(f"[Mapillary] probes={len(probes)} candidates={len(candidates)} strict={len(strict)} final={len(filtered)}")
 
-        return [
+        response_items = [
             ImageResponse(
                 id=img.id,
                 lat=img.lat,
@@ -263,6 +318,7 @@ async def get_images_along_path(req: ImagesAlongPathRequest):
             )
             for img in filtered
         ]
+        return response_items
 
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Mapillary path error: {e}")

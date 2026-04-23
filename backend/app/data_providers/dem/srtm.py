@@ -1,7 +1,10 @@
+import asyncio
+import json
 import numpy as np
 import httpx
 from app.data_providers.dem.base import DEMProvider, DEMData
 from app.core.config import settings
+from app.core.redis import get_redis
 
 class SRTMProvider(DEMProvider):
     """
@@ -10,6 +13,42 @@ class SRTMProvider(DEMProvider):
     """
 
     BASE = "https://portal.opentopography.org/API/globaldem"
+    CACHE_TTL = 86_400
+
+    @staticmethod
+    def _snap(value: float) -> float:
+        return round(round(value / 0.01) * 0.01, 2)
+
+    @staticmethod
+    def _cache_key(west: float, south: float, east: float, north: float) -> str:
+        snapped_west = SRTMProvider._snap(west)
+        snapped_south = SRTMProvider._snap(south)
+        snapped_east = SRTMProvider._snap(east)
+        snapped_north = SRTMProvider._snap(north)
+        return (
+            f"dem:{snapped_west:.2f}:{snapped_south:.2f}:{snapped_east:.2f}:{snapped_north:.2f}"
+        )
+
+    async def _redis_get_dem(self, cache_key: str) -> DEMData | None:
+        redis = await get_redis()
+        if redis is None:
+            return None
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return DEMData.from_dict(json.loads(cached))
+        except Exception:
+            return None
+        return None
+
+    async def _redis_set_dem(self, cache_key: str, data: DEMData) -> None:
+        redis = await get_redis()
+        if redis is None:
+            return
+        try:
+            await redis.set(cache_key, json.dumps(data.to_dict()), ex=self.CACHE_TTL)
+        except Exception:
+            pass
 
     def _fallback_dem(
         self, west: float, south: float, east: float, north: float
@@ -36,6 +75,14 @@ class SRTMProvider(DEMProvider):
         )
 
     def fetch(self, west: float, south: float, east: float, north: float) -> DEMData:
+        cache_key = self._cache_key(west, south, east, north)
+        try:
+            cached = asyncio.run(self._redis_get_dem(cache_key))
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+
         # Enforce minimum bounding box size for OpenTopography (~0.05 degrees)
         width = east - west
         height = north - south
@@ -74,14 +121,24 @@ class SRTMProvider(DEMProvider):
 
             elevation = self._parse_asc(text)
 
-            return DEMData(
+            result = DEMData(
                 elevation=elevation,
                 resolution_m=30.0,
                 bbox=[west, south, east, north],
                 provider="srtm",
             )
+            try:
+                asyncio.run(self._redis_set_dem(cache_key, result))
+            except Exception:
+                pass
+            return result
         except (httpx.HTTPError, ValueError):
-            return self._fallback_dem(west, south, east, north)
+            result = self._fallback_dem(west, south, east, north)
+            try:
+                asyncio.run(self._redis_set_dem(cache_key, result))
+            except Exception:
+                pass
+            return result
 
     def _parse_asc(self, text: str) -> np.ndarray:
         lines = text.strip().split("\n")

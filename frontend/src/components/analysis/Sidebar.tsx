@@ -194,6 +194,16 @@ function toDatasetOptions(
   return [];
 }
 
+function isSameAoi(a: { west: number; south: number; east: number; north: number } | null, b: { west: number; south: number; east: number; north: number } | null): boolean {
+  if (!a || !b) return false;
+  return (
+    a.west === b.west &&
+    a.south === b.south &&
+    a.east === b.east &&
+    a.north === b.north
+  );
+}
+
 export default function Sidebar() {
   const mode = useAnalysisStore((s) => s.mode);
   const setMode = useAnalysisStore((s) => s.setMode);
@@ -202,9 +212,12 @@ export default function Sidebar() {
   const isRunning = useAnalysisStore((s) => s.isRunning);
   const activeLayer = useAnalysisStore((s) => s.activeLayer);
   const floodLayers = useAnalysisStore((s) => s.floodLayers);
+  const lastAnalyzedBbox = useAnalysisStore((s) => s.lastAnalyzedBbox);
+  const lastAnalysisDurationSeconds = useAnalysisStore((s) => s.lastAnalysisDurationSeconds);
   const setRunning = useAnalysisStore((s) => s.setRunning);
   const setRiskResults = useAnalysisStore((s) => s.setRiskResults);
   const setActiveLayer = useAnalysisStore((s) => s.setActiveLayer);
+  const setLastAnalysisDurationSeconds = useAnalysisStore((s) => s.setLastAnalysisDurationSeconds);
   const setAOI = useAnalysisStore((s) => s.setAOI);
   const pathWidthMeters = useAnalysisStore((s) => s.pathWidthMeters);
   const setPathWidthMeters = useAnalysisStore((s) => s.setPathWidthMeters);
@@ -352,7 +365,14 @@ export default function Sidebar() {
 
   async function onRunAnalysis() {
     if (isRunning || !aoi) return;
+
+    if (floodLayers.length > 0 && isSameAoi(aoi, lastAnalyzedBbox)) {
+      return;
+    }
+
     setRunning(true);
+    setLastAnalysisDurationSeconds(null);
+    const startedAt = Date.now();
 
     try {
       const { run_id } = await api.analysis.run({
@@ -360,6 +380,8 @@ export default function Sidebar() {
         weather_days_back: 7,
       });
       const result = await api.analysis.poll(run_id);
+      const completedAt = Date.now();
+      setLastAnalysisDurationSeconds((completedAt - startedAt) / 1000);
 
       if (result.status !== "completed") {
         alert(`Analysis failed: ${result.status}`);
@@ -513,6 +535,18 @@ export default function Sidebar() {
       >
         {isRunning ? "Analyzing..." : !aoi ? "Draw a path first" : "Run Analysis"}
       </button>
+
+      {lastAnalysisDurationSeconds !== null && hasResults && (
+        <div
+          className={`inline-flex self-start rounded-full px-2 py-1 text-[11px] font-semibold ${
+            mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-200"
+          }`}
+        >
+          {lastAnalysisDurationSeconds < 0.5
+            ? `Cached — returned in ${lastAnalysisDurationSeconds.toFixed(1)}s`
+            : `Completed in ${lastAnalysisDurationSeconds.toFixed(1)}s`}
+        </div>
+      )}
 
       {hasResults && (
         <div className={`rounded-md p-3 ${mode === "simple" ? "bg-slate-100" : "bg-slate-900"} space-y-2`}>

@@ -2,12 +2,18 @@
 Main analysis pipeline — orchestrates all data fetching, processing, and risk scoring.
 Returns GeoJSON-ready risk layers.
 """
+import asyncio
+import json
 import numpy as np
 from uuid import UUID
+from typing import Awaitable, Callable, TypeVar
 from app.schemas.analysis import AnalysisRequest, AnalysisResult, RiskLayer
 from app.data_providers.weather.factory import get_weather_provider
+from app.data_providers.weather.base import WeatherSummary
 from app.data_providers.dem.factory import get_dem_provider
+from app.data_providers.dem.base import DEMData
 from app.data_providers.imagery.mapillary import MapillaryProvider
+from app.core.redis import get_redis
 from app.processing.terrain.analyzer import TerrainAnalyzer
 from app.processing.weather.analyzer import WeatherAnalyzer
 from app.processing.vision.analyzer import VisionAnalyzer
@@ -16,6 +22,37 @@ from app.simulation.base import SimulationInput
 from app.risk_engine.flood import FloodRiskEngine
 from app.risk_engine.heat import HeatRiskEngine
 from app.fusion.grid_to_geojson import grid_to_geojson_polygons
+
+T = TypeVar("T")
+
+
+def _snap(value: float) -> float:
+    return round(round(value / 0.01) * 0.01, 2)
+
+
+async def get_cached_or_fetch(
+    cache_key: str,
+    loader: Callable[[], Awaitable[T]],
+    deserialize: Callable[[str], T],
+    serialize: Callable[[T], str],
+    ttl_seconds: int,
+) -> T:
+    redis = await get_redis()
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return deserialize(cached)
+        except Exception:
+            pass
+
+    value = await loader()
+    if redis is not None:
+        try:
+            await redis.set(cache_key, serialize(value), ex=ttl_seconds)
+        except Exception:
+            pass
+    return value
 
 
 class AnalysisPipeline:
@@ -29,14 +66,47 @@ class AnalysisPipeline:
 
         # ── 1. DATA FETCHING ────────────────────────────────────────────────
         weather_prov = get_weather_provider()
-        weather_summary = weather_prov.fetch_historical(cy, cx, request.weather_days_back)
-
         dem_prov = get_dem_provider()
-        dem_data = dem_prov.fetch(bbox.west, bbox.south, bbox.east, bbox.north)
-
         mapillary = MapillaryProvider()
-        images = mapillary.fetch_images_by_bbox(
-            bbox.west, bbox.south, bbox.east, bbox.north, limit=100
+        weather_key = f"weather:{round(cy,1)}:{round(cx,1)}:{request.weather_days_back}"
+        dem_key = (
+            f"dem:{_snap(bbox.west):.2f}:{_snap(bbox.south):.2f}:"
+            f"{_snap(bbox.east):.2f}:{_snap(bbox.north):.2f}"
+        )
+
+        weather_task = asyncio.create_task(
+            get_cached_or_fetch(
+                cache_key=weather_key,
+                loader=lambda: weather_prov.fetch_historical(cy, cx, request.weather_days_back),
+                deserialize=lambda raw: WeatherSummary.from_dict(json.loads(raw)),
+                serialize=lambda value: json.dumps(value.to_dict()),
+                ttl_seconds=3_600,
+            )
+        )
+        dem_task = asyncio.create_task(
+            get_cached_or_fetch(
+                cache_key=dem_key,
+                loader=lambda: asyncio.to_thread(dem_prov.fetch, bbox.west, bbox.south, bbox.east, bbox.north),
+                deserialize=lambda raw: DEMData.from_dict(json.loads(raw)),
+                serialize=lambda value: json.dumps(value.to_dict()),
+                ttl_seconds=86_400,
+            )
+        )
+        images_task = asyncio.create_task(
+            asyncio.to_thread(
+                mapillary.fetch_images_by_bbox,
+                bbox.west,
+                bbox.south,
+                bbox.east,
+                bbox.north,
+                100,
+            )
+        )
+
+        weather_summary, dem_data, images = await asyncio.gather(
+            weather_task,
+            dem_task,
+            images_task,
         )
 
         # ── 2. PROCESSING ───────────────────────────────────────────────────
