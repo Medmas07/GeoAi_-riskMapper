@@ -129,7 +129,7 @@ export const api = {
   assistant: {
     chat: (
       body: {
-        model: string;
+        model?: string;
         messages: AssistantChatMessage[];
         tools: unknown[];
         tool_choice: string;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AssistantChatMessage } from "@/lib/api";
 import { useAnalysisStore, type DrawnPathPoint } from "@/store/analysis";
 
-const GROQ_MODEL = "llama-3.1-8b-instant";
+const GROQ_MODEL = process.env.NEXT_PUBLIC_GROQ_MODEL?.trim() || undefined;
 
 type Role = "user" | "assistant" | "tool";
 
@@ -28,6 +28,21 @@ interface GeocodeResult {
   lon: number;
   display_name: string;
   boundingbox?: [string, string, string, string];
+}
+
+interface ReverseGeocodeResult {
+  display_name?: string;
+  name?: string;
+  address?: {
+    suburb?: string;
+    neighbourhood?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+    state?: string;
+    country?: string;
+  };
 }
 
 const TOOLS = [
@@ -161,6 +176,35 @@ function isVagueLocation(loc: string): boolean {
   return !lower || VAGUE_TERMS.some((t) => lower.includes(t));
 }
 
+function isWeatherQuestion(text: string): boolean {
+  return /\b(weather|forecast|temperature|temp|rain|rainfall|raining|sunny|wind|humidity)\b/i.test(text);
+}
+
+function isPlaceIdentityQuestion(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  return /\b(what s this place|what is this place|what s the place|what is the place|what place is this|where am i|where is this|where is this place|identify this place|name this place|which place is this)\b/i.test(
+    normalized
+  );
+}
+
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&format=jsonv2`;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  if (!res.ok) return null;
+  const data = (await res.json()) as ReverseGeocodeResult;
+  const parts = [
+    data.address?.suburb,
+    data.address?.neighbourhood,
+    data.address?.city,
+    data.address?.town,
+    data.address?.village,
+    data.address?.county,
+    data.address?.state,
+    data.address?.country,
+  ].filter(Boolean) as string[];
+  return data.display_name ?? data.name ?? (parts.length ? parts.join(", ") : null);
+}
+
 async function geocode(location: string): Promise<GeocodeResult | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=jsonv2&limit=1`;
   const res = await fetch(url, { headers: { "Accept-Language": "en" } });
@@ -208,6 +252,7 @@ TOOL RULES (never violate):
 - get_risk_summary: when user asks about current map results.
 - geocode_location: when user asks to navigate/find a place.
 - get_weather: when user asks about weather. If user says "here", "there", "this area" — still call get_weather, the tool will use the current map area automatically.
+- The current map area from the zustand store is authoritative. If it exists and the user asks about weather "here/there/current area", use that area and do not invent a city name.
 
 APP STATE:
 - Risk loaded: ${hasRisk ? `YES (${state.floodLayers.length} flood, ${state.heatLayers.length} heat zones)` : "NO"}
@@ -455,6 +500,7 @@ async function executeTool(
       };
 
       actions.setAOI(bbox);
+      actions.setMode("advanced");
       actions.flyTo({ lat: geo.lat, lon: geo.lon, zoom: 13 });
       actions.setRunning(true);
 
@@ -663,6 +709,96 @@ export default function GeoAssistant() {
 
       const userMessage: Message = { id: genId(), role: "user", content: trimmed };
       setMessages((prev) => [...prev, userMessage]);
+
+      const currentAoi = useAnalysisStore.getState().aoi;
+      const weatherShortcut = currentAoi && isWeatherQuestion(trimmed) && isVagueLocation(trimmed);
+      const identityShortcut = currentAoi && isPlaceIdentityQuestion(trimmed);
+
+      if (identityShortcut) {
+        const center = {
+          lat: (currentAoi.north + currentAoi.south) / 2,
+          lon: (currentAoi.east + currentAoi.west) / 2,
+        };
+
+        try {
+          const placeName = await reverseGeocode(center.lat, center.lon);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genId(),
+              role: "assistant",
+              content: placeName
+                ? `This looks like ${placeName}.`
+                : `This area is centered at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`,
+            },
+          ]);
+        } catch (error) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genId(),
+              role: "assistant",
+              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ]);
+        } finally {
+          setLoading(false);
+        }
+
+        return;
+      }
+
+      if (weatherShortcut) {
+        const center = {
+          lat: (currentAoi.north + currentAoi.south) / 2,
+          lon: (currentAoi.east + currentAoi.west) / 2,
+        };
+
+        const toolMessageId = genId();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: toolMessageId,
+            role: "tool",
+            toolName: "get_weather",
+            content: "Checking the current analyzed area from the store...",
+          },
+        ]);
+
+        try {
+          const weather = (await api.weather.get(center.lat, center.lon, 7)) as {
+            mean_temp_c: number;
+            total_rainfall_mm: number;
+            peak_intensity_mm_hr: number;
+            provider: string;
+          };
+          const summary = [
+            `Weather for the current analyzed area (${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}):`,
+            `• Mean temperature: ${Number(weather.mean_temp_c).toFixed(1)}°C`,
+            `• Rainfall: ${Number(weather.total_rainfall_mm).toFixed(1)} mm`,
+            `• Peak intensity: ${Number(weather.peak_intensity_mm_hr).toFixed(1)} mm/hr`,
+            `• Source: ${String(weather.provider)}`,
+          ].join("\n");
+
+          setMessages((prev) => [
+            ...prev,
+            { id: genId(), role: "assistant", content: summary },
+          ]);
+        } catch (error) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genId(),
+              role: "assistant",
+              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ]);
+        } finally {
+          setLoading(false);
+        }
+
+        return;
+      }
 
       const recentMessages = messages
         .filter((m) => m.role !== "tool")

@@ -96,13 +96,31 @@ export default function MapView({ onMapReady }: MapViewProps) {
   const [mapReady, setMapReady] = useState(false);
 
   const activeImage = images[clampIndex(currentIndex, images.length)];
-  const googlePinIcon = useMemo(
+  const mapPinIcon = useMemo(
     () =>
       L.divIcon({
-        html: '<span class="google-pin-emoji" aria-hidden="true">📍</span>',
-        iconSize: [28, 42],
-        iconAnchor: [14, 42],
-        className: "google-pin-icon",
+        html: `
+          <svg class="map-pin-svg" aria-hidden="true" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="pinFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ff7a6a" />
+                <stop offset="100%" stop-color="#d83c30" />
+              </linearGradient>
+              <radialGradient id="pinGlow" cx="50%" cy="40%" r="60%">
+                <stop offset="0%" stop-color="#ffffff" stop-opacity="0.26" />
+                <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+              </radialGradient>
+            </defs>
+            <ellipse cx="16" cy="37" rx="6.2" ry="1.8" fill="#000000" opacity="0.16"/>
+            <path d="M16 39.5c5.2-6.8 8.4-12 8.4-18.1C24.4 14 20.8 9.8 16 9.8S7.6 14 7.6 21.4C7.6 27.5 10.8 32.7 16 39.5Z" fill="url(#pinFill)" stroke="#fff7f4" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M16 11.7c4.4 0 7.6 3.8 7.6 9.2 0 5-2.6 9.4-7.6 16.3-5-6.9-7.6-11.3-7.6-16.3 0-5.4 3.2-9.2 7.6-9.2Z" fill="url(#pinGlow)"/>
+            <circle cx="16" cy="21" r="5.2" fill="#ffffff" opacity="0.96"/>
+            <circle cx="16" cy="21" r="2.2" fill="#0b0f1a" opacity="0.92"/>
+          </svg>
+        `,
+        iconSize: [32, 42],
+        iconAnchor: [16, 40],
+        className: "map-pin-icon",
       }),
     []
   );
@@ -227,9 +245,7 @@ export default function MapView({ onMapReady }: MapViewProps) {
       fillOpacity: 0.05,
     }).addTo(map);
 
-    if (mode !== "advanced") {
-      map.fitBounds(bounds, { padding: [48, 48] });
-    }
+    map.fitBounds(bounds, { padding: [48, 48] });
   }, [aoi, mode]);
 
   // ---------------------------------------------------------------------------
@@ -365,7 +381,7 @@ export default function MapView({ onMapReady }: MapViewProps) {
 
     if (!markerRef.current) {
       markerRef.current = L.marker(latlng, {
-        icon: googlePinIcon,
+        icon: mapPinIcon,
         zIndexOffset: 9999,
         keyboard: false,
       }).addTo(map);
@@ -374,7 +390,7 @@ export default function MapView({ onMapReady }: MapViewProps) {
         markerRef.current.addTo(map);
       }
       markerRef.current.setLatLng(latlng);
-      markerRef.current.setIcon(googlePinIcon);
+      markerRef.current.setIcon(mapPinIcon);
       markerRef.current.setZIndexOffset(9999);
     }
 
@@ -383,7 +399,7 @@ export default function MapView({ onMapReady }: MapViewProps) {
     } else {
       map.panTo(latlng, { animate: true, duration: 0.3 });
     }
-  }, [mode, images, trajectory, currentIndex, mapReady, googlePinIcon]);
+  }, [mode, images, trajectory, currentIndex, mapReady, mapPinIcon]);
 
   // ---------------------------------------------------------------------------
   // Render
