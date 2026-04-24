@@ -154,8 +154,26 @@ class AnalysisPipeline:
         )
         heat_layers = grid_to_geojson_polygons(
             heat_grid.score, heat_grid.category, heat_grid.components,
-            bbox.to_list(), dem_data.resolution_m, risk_type="heat"
+            bbox.to_list(), dem_data.resolution_m, risk_type="heat",
+            min_category=0,
         )
+
+        # Guarantee at least one heat layer so frontend always has component stats.
+        # Even if all cells score 0 (e.g. cold winter data), the stats panel still works.
+        if not heat_layers:
+            heat_layers = [RiskLayer(
+                risk_type="heat",
+                score=round(float(heat_grid.score.mean()), 3),
+                geometry={
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [bbox.west, bbox.north], [bbox.east, bbox.north],
+                        [bbox.east, bbox.south], [bbox.west, bbox.south],
+                        [bbox.west, bbox.north],
+                    ]],
+                },
+                components={**heat_grid.components, "category": 0},
+            )]
 
         mapped_images = [
             ImagePoint(

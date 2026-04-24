@@ -46,8 +46,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
+    # HuggingFace
+    HF_API_KEY: str = ""
+
     # CV Model
-    CV_MODEL: Literal["clip", "resnet", "mock"] = "clip"
+    CV_MODEL: Literal["clip", "resnet", "mock", "groq", "segformer"] = "clip"
     OPENTOPOGRAPHY_API_KEY: str = ""
 
     class Config:

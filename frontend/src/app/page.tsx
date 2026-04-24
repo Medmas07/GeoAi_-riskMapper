@@ -5,6 +5,7 @@ import type L from "leaflet";
 import Sidebar from "@/components/analysis/Sidebar";
 import ImageViewer from "@/components/analysis/ImageViewer";
 import ProfileChart from "@/components/analysis/ProfileChart";
+import RiskStatsPanel from "@/components/analysis/RiskStatsPanel";
 import GeoAssistant from "@/components/assistant/GeoAssistant";
 import SearchBar from "@/components/map/SearchBar";
 import { useAnalysisStore } from "@/store/analysis";
@@ -73,6 +74,40 @@ function ToolbarBtn({
       {children}
       <span>{label}</span>
     </button>
+  );
+}
+
+// ── Bottom panel ─────────────────────────────────────────────────────────────
+// When results exist: ProfileChart left (60%) | RiskStatsPanel right (40%)
+// Before results: ProfileChart full width
+
+function BottomPanel() {
+  const floodLayers = useAnalysisStore((s) => s.floodLayers);
+  const hasResults = floodLayers.length > 0;
+
+  return (
+    <div className="col-span-2 flex min-h-0 min-w-0 overflow-hidden border-t-2 border-slate-700">
+      {/* Elevation profile — always shown */}
+      <div className={`min-h-0 min-w-0 overflow-hidden transition-all duration-500 ${hasResults ? "w-[60%] border-r border-white/[0.06]" : "w-full"}`}>
+        <ProfileChart />
+      </div>
+
+      {/* Risk stats — slides in when results arrive */}
+      {hasResults && (
+        <div className="w-[40%] min-h-0 overflow-hidden bg-[#080e1c]">
+          <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+            <svg className="h-3 w-3 text-cyan-400" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <path d="M1 10V5M4 10V3M7 10V6M10 10V1" strokeLinecap="round" />
+            </svg>
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Risk Statistics</span>
+            <span className="ml-auto h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)]" />
+          </div>
+          <div className="h-[calc(100%-29px)] overflow-hidden">
+            <RiskStatsPanel />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -216,10 +251,8 @@ export default function Home() {
         {assistantOpen && <GeoAssistant />}
       </div>
 
-      {/* Col 2-3: ProfileChart — row 2, spans cols 2 and 3 */}
-      <div className="col-span-2 min-w-0 min-h-0 overflow-hidden border-t-2 border-slate-700">
-        <ProfileChart />
-      </div>
+      {/* Col 2-3: Bottom panel — row 2, spans cols 2 and 3 */}
+      <BottomPanel />
 
     </main>
   );
