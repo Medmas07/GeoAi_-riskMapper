@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
@@ -94,8 +95,7 @@ async def run_analysis(
 
     background_tasks.add_task(_execute_pipeline, run_id, request, db, bbox_key)
 
-    from datetime import datetime
-    return AnalysisStatus(run_id=run_id, status="pending", created_at=datetime.utcnow())
+    return AnalysisStatus(run_id=run_id, status="pending", created_at=datetime.now(timezone.utc))
 
 
 @router.get("/{run_id}", response_model=AnalysisResult | AnalysisStatus)
@@ -108,8 +108,7 @@ async def get_analysis(run_id: uuid.UUID):
     if key in _results:
         return _results[key]
 
-    from datetime import datetime
-    return AnalysisStatus(run_id=run_id, status="running", created_at=datetime.utcnow())
+    return AnalysisStatus(run_id=run_id, status="running", created_at=datetime.now(timezone.utc))
 
 
 async def _execute_pipeline(

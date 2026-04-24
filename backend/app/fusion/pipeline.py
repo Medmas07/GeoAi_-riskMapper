@@ -4,10 +4,11 @@ Returns GeoJSON-ready risk layers.
 """
 import asyncio
 import json
+import logging
 import numpy as np
 from uuid import UUID
 from typing import Awaitable, Callable, TypeVar
-from app.schemas.analysis import AnalysisRequest, AnalysisResult, RiskLayer
+from app.schemas.analysis import AnalysisRequest, AnalysisResult, ImagePoint, RiskLayer
 from app.data_providers.weather.factory import get_weather_provider
 from app.data_providers.weather.base import WeatherSummary
 from app.data_providers.dem.factory import get_dem_provider
@@ -24,6 +25,7 @@ from app.risk_engine.heat import HeatRiskEngine
 from app.fusion.grid_to_geojson import grid_to_geojson_polygons
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
 def _snap(value: float) -> float:
@@ -92,16 +94,21 @@ class AnalysisPipeline:
                 ttl_seconds=86_400,
             )
         )
-        images_task = asyncio.create_task(
-            asyncio.to_thread(
-                mapillary.fetch_images_by_bbox,
-                bbox.west,
-                bbox.south,
-                bbox.east,
-                bbox.north,
-                100,
-            )
-        )
+        async def _safe_fetch_images():
+            try:
+                return await asyncio.to_thread(
+                    mapillary.fetch_images_by_bbox,
+                    bbox.west,
+                    bbox.south,
+                    bbox.east,
+                    bbox.north,
+                    100,
+                )
+            except Exception as exc:
+                logger.warning("Mapillary imagery unavailable for bbox: %s", exc)
+                return []
+
+        images_task = asyncio.create_task(_safe_fetch_images())
 
         weather_summary, dem_data, images = await asyncio.gather(
             weather_task,
@@ -134,6 +141,12 @@ class AnalysisPipeline:
             terrain_features, weather_features, vision_summary
         )
 
+        if float(flood_grid.score.mean()) < 0.15:
+            logger.warning(
+                "Flood scores very low (mean=%.3f), likely missing vision/sim data",
+                float(flood_grid.score.mean()),
+            )
+
         # ── 5. EXPORT TO GEOJSON ────────────────────────────────────────────
         flood_layers = grid_to_geojson_polygons(
             flood_grid.score, flood_grid.category, flood_grid.components,
@@ -144,11 +157,32 @@ class AnalysisPipeline:
             bbox.to_list(), dem_data.resolution_m, risk_type="heat"
         )
 
+        mapped_images = [
+            ImagePoint(
+                id=str(img.id),
+                url=str(img.thumb_url or ""),
+                lat=float(img.lat),
+                lon=float(img.lon),
+            )
+            for img in (images or [])
+            if getattr(img, "lat", None)
+            and getattr(img, "lon", None)
+            and getattr(img, "thumb_url", None)
+        ][:200]
+
+        logger.info(
+            "Pipeline complete — %d flood polygons, %d heat polygons, %d images with thumbnails",
+            len(flood_layers),
+            len(heat_layers),
+            len([i for i in images if getattr(i, "thumb_url", None)]),
+        )
+
         return AnalysisResult(
             run_id=run_id,
             status="completed",
             flood_layers=flood_layers,
             heat_layers=heat_layers,
-            image_count=len(images),
+            images=mapped_images,
+            image_count=len(mapped_images),
             simulation_engine_used=engine.name,
         )

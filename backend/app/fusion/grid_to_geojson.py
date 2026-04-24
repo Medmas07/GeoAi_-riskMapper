@@ -9,13 +9,27 @@ def grid_to_geojson_polygons(
     bbox: list[float],
     resolution_m: float,
     risk_type: str,
-    simplify_threshold: float = 0.4,  # only export cells above this score
+    min_category: int = 1,
 ) -> list[RiskLayer]:
     """
     Converts a numpy risk grid to a list of GeoJSON polygon features.
-    Each cell becomes a polygon. Cells below threshold are skipped.
+    Each cell becomes a polygon. Category 0 cells are skipped by default.
     For production: use rasterio/shapely contour polygons instead.
     """
+    from scipy.ndimage import zoom as ndimage_zoom
+
+    # Downsample grid to reduce polygon count
+    if score.shape[0] > 50 or score.shape[1] > 50:
+        factor = min(1.0, 40.0 / max(score.shape))
+        new_h = max(10, int(score.shape[0] * factor))
+        new_w = max(10, int(score.shape[1] * factor))
+        score = ndimage_zoom(score, (new_h / score.shape[0], new_w / score.shape[1]), order=1)
+        category = ndimage_zoom(
+            category.astype(float),
+            (new_h / category.shape[0], new_w / category.shape[1]),
+            order=0,
+        ).astype(int)
+
     west, south, east, north = bbox
     rows, cols = score.shape
 
@@ -26,7 +40,10 @@ def grid_to_geojson_polygons(
     for r in range(rows):
         for c in range(cols):
             s = float(score[r, c])
-            if s < simplify_threshold:
+            cell_category = int(category[r, c])
+            if cell_category == 0:
+                continue
+            if cell_category < min_category:
                 continue
 
             lat0 = north - r * lat_step
@@ -47,7 +64,11 @@ def grid_to_geojson_polygons(
                 risk_type=risk_type,
                 score=round(s, 3),
                 geometry=polygon,
-                components={**components, "category": int(category[r, c])},
+                components={**components, "category": cell_category},
             ))
+
+    if len(layers) > 500:
+        layers.sort(key=lambda layer: layer.score, reverse=True)
+        layers = layers[:500]
 
     return layers

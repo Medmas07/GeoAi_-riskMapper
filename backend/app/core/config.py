@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     SIMULATION_ENGINE: Literal["hecras", "null"] = "null"
     HECRAS_MCP_URL: str = ""
 
+    # Groq / assistant
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
     # CV Model
     CV_MODEL: Literal["clip", "resnet", "mock"] = "clip"
     OPENTOPOGRAPHY_API_KEY: str = ""

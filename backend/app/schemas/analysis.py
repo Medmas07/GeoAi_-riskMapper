@@ -36,10 +36,18 @@ class RiskLayer(BaseModel):
     components: dict
 
 
+class ImagePoint(BaseModel):
+    id: str
+    url: str
+    lat: float
+    lon: float
+
+
 class AnalysisResult(BaseModel):
     run_id: UUID
     status: str
     flood_layers: list[RiskLayer] = []
     heat_layers: list[RiskLayer] = []
+    images: list[ImagePoint] = Field(default_factory=list)
     image_count: int = 0
     simulation_engine_used: str = "null"

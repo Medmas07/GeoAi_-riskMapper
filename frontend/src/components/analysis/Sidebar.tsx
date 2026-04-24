@@ -15,6 +15,8 @@ import type {
   MapillaryImage,
 } from "@/types";
 
+// ── Pure helpers (unchanged) ─────────────────────────────────────────────────
+
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const r = 6_371_000;
@@ -28,27 +30,19 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
 function sortImagesByNearest(images: MapillaryImage[]): MapillaryImage[] {
   if (images.length <= 1) return images;
-
   const sorted = [images[0]];
   const remaining = images.slice(1);
-
   while (remaining.length) {
     const last = sorted[sorted.length - 1];
     let nearestIdx = 0;
     let nearestDist = Infinity;
-
     for (let i = 0; i < remaining.length; i++) {
       const candidate = remaining[i];
       const d = Math.hypot(candidate.lat - last.lat, candidate.lon - last.lon);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestIdx = i;
-      }
+      if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
     }
-
     sorted.push(remaining.splice(nearestIdx, 1)[0]);
   }
-
   return sorted;
 }
 
@@ -58,47 +52,29 @@ function buildFlatTrajectoryAndProfile(images: MapillaryImage[]): {
 } {
   const trajectory: TrajectoryPoint[] = [];
   const profile: ProfilePoint[] = [];
-
   let cumulative = 0;
   for (let i = 0; i < images.length; i++) {
     const image = images[i];
-    const elevation = 0;
-    trajectory.push({
-      lat: image.lat,
-      lon: image.lon,
-      elevation,
-      image_id: image.id,
-    });
-
+    trajectory.push({ lat: image.lat, lon: image.lon, elevation: 0, image_id: image.id });
     if (i > 0) {
       const prev = images[i - 1];
       cumulative += haversineMeters(prev.lat, prev.lon, image.lat, image.lon);
     }
-
-    profile.push({
-      distance: cumulative,
-      elevation,
-      slope: 0,
-    });
+    profile.push({ distance: cumulative, elevation: 0, slope: 0 });
   }
-
   return { trajectory, profile };
 }
 
 function buildTrajectoryAndProfileFromElevation(
   images: MapillaryImage[],
   elevationResponse: ElevationProfileResponse
-): {
-  trajectory: TrajectoryPoint[];
-  profile: ProfilePoint[];
-} {
+): { trajectory: TrajectoryPoint[]; profile: ProfilePoint[] } {
   const source = elevationResponse.profile;
   if (!source.length) return buildFlatTrajectoryAndProfile(images);
 
   const sampledElevations: number[] = [];
   const lastSourceIndex = source.length - 1;
   const lastImageIndex = Math.max(1, images.length - 1);
-
   for (let i = 0; i < images.length; i++) {
     const srcIdx = Math.round((i * lastSourceIndex) / lastImageIndex);
     sampledElevations.push(source[srcIdx].elevation);
@@ -107,18 +83,10 @@ function buildTrajectoryAndProfileFromElevation(
   const trajectory: TrajectoryPoint[] = [];
   const profile: ProfilePoint[] = [];
   let cumulative = 0;
-
   for (let i = 0; i < images.length; i++) {
     const image = images[i];
     const elevation = sampledElevations[i];
-
-    trajectory.push({
-      lat: image.lat,
-      lon: image.lon,
-      elevation,
-      image_id: image.id,
-    });
-
+    trajectory.push({ lat: image.lat, lon: image.lon, elevation, image_id: image.id });
     let slope = 0;
     if (i > 0) {
       const prevImage = images[i - 1];
@@ -127,32 +95,17 @@ function buildTrajectoryAndProfileFromElevation(
       cumulative += segment;
       slope = segment > 0 ? ((elevation - prevElevation) / segment) * 100 : 0;
     }
-
-    profile.push({
-      distance: cumulative,
-      elevation,
-      slope,
-    });
+    profile.push({ distance: cumulative, elevation, slope });
   }
-
   return { trajectory, profile };
 }
 
 type ProviderSelectValue = "default" | ElevationProviderName;
-
-type DatasetOption = {
-  value: string;
-  label: string;
-};
+type DatasetOption = { value: string; label: string };
 
 const FALLBACK_PROVIDER_OPTIONS: ElevationProviderName[] = [
-  "ors",
-  "opentopography",
-  "opentopodata",
-  "openelevation",
-  "geonames",
+  "ors", "opentopography", "opentopodata", "openelevation", "geonames",
 ];
-
 const PROVIDER_LABELS: Record<ElevationProviderName, string> = {
   ors: "OpenRouteService",
   opentopography: "OpenTopography",
@@ -166,7 +119,6 @@ function toDatasetOptions(
   options: ElevationProfileOptionsResponse | null
 ): DatasetOption[] {
   if (!options || provider === "default") return [];
-
   if (provider === "opentopodata") {
     const datasets = options.datasets?.opentopodata ?? {};
     return Object.entries(datasets).map(([key, value]) => ({
@@ -174,15 +126,10 @@ function toDatasetOptions(
       label: value?.label ?? key,
     }));
   }
-
   if (provider === "opentopography") {
     const datasets = options.datasets?.opentopography ?? {};
-    return Object.entries(datasets).map(([key, value]) => ({
-      value: key,
-      label: `${key} - ${value}`,
-    }));
+    return Object.entries(datasets).map(([key, value]) => ({ value: key, label: `${key} - ${value}` }));
   }
-
   if (provider === "geonames") {
     const datasets = options.datasets?.geonames ?? {};
     return Object.entries(datasets).map(([key, value]) => ({
@@ -190,23 +137,38 @@ function toDatasetOptions(
       label: value?.resolution ? `${key} (${value.resolution})` : key,
     }));
   }
-
   return [];
 }
 
-function isSameAoi(a: { west: number; south: number; east: number; north: number } | null, b: { west: number; south: number; east: number; north: number } | null): boolean {
+function isSameAoi(
+  a: { west: number; south: number; east: number; north: number } | null,
+  b: { west: number; south: number; east: number; north: number } | null
+): boolean {
   if (!a || !b) return false;
+  return a.west === b.west && a.south === b.south && a.east === b.east && a.north === b.north;
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    a.west === b.west &&
-    a.south === b.south &&
-    a.east === b.east &&
-    a.north === b.north
+    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+      {children}
+    </p>
   );
 }
 
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+
 export default function Sidebar() {
-  const mode = useAnalysisStore((s) => s.mode);
-  const setMode = useAnalysisStore((s) => s.setMode);
   const aoi = useAnalysisStore((s) => s.aoi);
   const drawnPath = useAnalysisStore((s) => s.drawnPath);
   const isRunning = useAnalysisStore((s) => s.isRunning);
@@ -221,8 +183,9 @@ export default function Sidebar() {
   const setAOI = useAnalysisStore((s) => s.setAOI);
   const flyTo = useAnalysisStore((s) => s.flyTo);
   const pathWidthMeters = useAnalysisStore((s) => s.pathWidthMeters);
-  const setPathWidthMeters = useAnalysisStore((s) => s.setPathWidthMeters);
   const setData = useAnalysisStore((s) => s.setData);
+  const mode = useAnalysisStore((s) => s.mode);
+  const setMode = useAnalysisStore((s) => s.setMode);
 
   const [profileOptions, setProfileOptions] = useState<ElevationProfileOptionsResponse | null>(null);
   const [elevationProvider, setElevationProvider] = useState<ProviderSelectValue>("default");
@@ -233,37 +196,28 @@ export default function Sidebar() {
 
   useEffect(() => {
     let active = true;
-
-    api.elevation
-      .options()
-      .then((options) => {
-        if (!active) return;
-        setProfileOptions(options);
-      })
-      .catch((error) => {
-        console.warn("[elevation] options API unavailable, using defaults", error);
-      });
-
-    return () => {
-      active = false;
-    };
+    api.elevation.options().then((options) => {
+      if (!active) return;
+      setProfileOptions(options);
+    }).catch((error) => {
+      console.warn("[elevation] options API unavailable, using defaults", error);
+    });
+    return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    setElevationDataset("default");
-  }, [elevationProvider]);
+  useEffect(() => { setElevationDataset("default"); }, [elevationProvider]);
 
   const aoiLabel = useMemo(() => {
-    if (!aoi) return "No path drawn";
-    const spanLat = ((aoi.north - aoi.south) * 111).toFixed(1);
-    const spanLon = ((aoi.east - aoi.west) * 111).toFixed(1);
-    return `${spanLat} x ${spanLon} km (${aoi.south.toFixed(4)}, ${aoi.west.toFixed(4)})`;
+    if (!aoi) return null;
+    return {
+      span: `${((aoi.north - aoi.south) * 111).toFixed(1)} × ${((aoi.east - aoi.west) * 111).toFixed(1)} km`,
+      coords: `${aoi.south.toFixed(4)}°N  ${aoi.west.toFixed(4)}°E`,
+    };
   }, [aoi]);
 
   const providerOptions = useMemo(() => {
     const configured = (profileOptions?.providers ?? FALLBACK_PROVIDER_OPTIONS).filter(
-      (provider): provider is ElevationProviderName =>
-        FALLBACK_PROVIDER_OPTIONS.includes(provider as ElevationProviderName)
+      (p): p is ElevationProviderName => FALLBACK_PROVIDER_OPTIONS.includes(p as ElevationProviderName)
     );
     return configured.length ? configured : FALLBACK_PROVIDER_OPTIONS;
   }, [profileOptions]);
@@ -280,47 +234,31 @@ export default function Sidebar() {
   ): Promise<MapillaryImage[]> {
     if (path && path.length >= 2) {
       const alongPath = await api.mapillary.imagesAlongPath(path, widthMeters).catch(() => []);
-      if (alongPath.length > 0) {
-        return alongPath;
-      }
-      console.log("No images along exact path, falling back to bounding box query");
+      if (alongPath.length > 0) return alongPath;
     }
-
     if (!aoiBox) return [];
-
     const bboxImages = await api.mapillary
       .images(aoiBox.west, aoiBox.south, aoiBox.east, aoiBox.north)
       .catch(() => []);
-
     return sortImagesByNearest(bboxImages);
   }
 
   async function buildTrajectoryAndProfile(
     sortedImages: MapillaryImage[]
   ): Promise<{ trajectory: TrajectoryPoint[]; profile: ProfilePoint[] }> {
-    if (sortedImages.length < 2) {
-      return buildFlatTrajectoryAndProfile(sortedImages);
-    }
-
+    if (sortedImages.length < 2) return buildFlatTrajectoryAndProfile(sortedImages);
     try {
       const selectedProvider = elevationProvider === "default" ? undefined : elevationProvider;
       const selectedDataset = elevationDataset === "default" ? undefined : elevationDataset;
-      // Keep selected provider as first choice, but allow fallback chain
-      // to avoid hard failures when one provider times out.
-      const useFallback = true;
-
       const elevation = await api.elevation.profile({
         line: sortedImages.map((img) => [img.lon, img.lat] as [number, number]),
         provider: selectedProvider,
         dataset: selectedDataset,
-        use_fallback: useFallback,
+        use_fallback: true,
       });
-      console.info(
-        `[elevation] provider=${elevation.provider} dataset=${elevation.dataset ?? "default"} points=${elevation.points.length}`
-      );
       return buildTrajectoryAndProfileFromElevation(sortedImages, elevation);
     } catch (error) {
-      console.warn("[elevation] profile API failed, using flat fallback profile", error);
+      console.warn("[elevation] profile API failed, using flat fallback", error);
       return buildFlatTrajectoryAndProfile(sortedImages);
     }
   }
@@ -332,9 +270,7 @@ export default function Sidebar() {
     const timeoutId = setTimeout(async () => {
       try {
         const sortedImgs = await fetchMapillaryImages(drawnPath, pathWidthMeters, aoi);
-        console.log("IMAGES:", JSON.stringify(sortedImgs[0]));
         const { trajectory, profile } = await buildTrajectoryAndProfile(sortedImgs);
-
         setData({
           trajectory,
           profile,
@@ -343,9 +279,7 @@ export default function Sidebar() {
             lat: img.lat,
             lon: img.lon,
             thumb_url: img.thumb_url,
-            url:
-              img.thumb_url ??
-              "https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found",
+            url: img.thumb_url ?? "https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found",
           })),
         });
         lastAppliedWidthRef.current = pathWidthMeters;
@@ -355,33 +289,18 @@ export default function Sidebar() {
     }, 400);
 
     return () => clearTimeout(timeoutId);
-  }, [
-    pathWidthMeters,
-    mode,
-    hasResults,
-    drawnPath,
-    aoi,
-    setData,
-    elevationProvider,
-    elevationDataset,
-  ]);
+  }, [pathWidthMeters, mode, hasResults, drawnPath, aoi, setData, elevationProvider, elevationDataset]);
 
   async function onRunAnalysis() {
     if (isRunning || !aoi) return;
-
-    if (floodLayers.length > 0 && isSameAoi(aoi, lastAnalyzedBbox)) {
-      return;
-    }
+    if (floodLayers.length > 0 && isSameAoi(aoi, lastAnalyzedBbox)) return;
 
     setRunning(true);
     setLastAnalysisDurationSeconds(null);
     const startedAt = Date.now();
 
     try {
-      const { run_id } = await api.analysis.run({
-        bbox: aoi,
-        weather_days_back: 7,
-      });
+      const { run_id } = await api.analysis.run({ bbox: aoi, weather_days_back: 7 });
       const result = await api.analysis.poll(run_id);
       const completedAt = Date.now();
       setLastAnalysisDurationSeconds((completedAt - startedAt) / 1000);
@@ -396,10 +315,7 @@ export default function Sidebar() {
         id: img.id,
         lat: img.lat,
         lon: img.lon,
-        url:
-          img.url ??
-          img.thumb_url ??
-          "https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found",
+        url: img.url ?? img.thumb_url ?? "https://placehold.co/1200x700/0f172a/ffffff?text=No+Mapillary+Image+Found",
       }));
 
       const trajectoryFromResult =
@@ -409,23 +325,12 @@ export default function Sidebar() {
           elevation: point.elevation ?? 0,
           image_id: point.image_id ?? normalizedImages[index]?.id ?? `pt-${index}`,
         })) ??
-        normalizedImages.map((img) => ({
-          lat: img.lat,
-          lon: img.lon,
-          elevation: 0,
-          image_id: img.id,
-        }));
+        normalizedImages.map((img) => ({ lat: img.lat, lon: img.lon, elevation: 0, image_id: img.id }));
 
       const { profile } = await buildTrajectoryAndProfile(normalizedImages);
 
-      setData({
-        trajectory: trajectoryFromResult,
-        profile,
-        images: normalizedImages,
-      });
-
+      setData({ trajectory: trajectoryFromResult, profile, images: normalizedImages });
       setRiskResults(result.flood_layers ?? [], result.heat_layers ?? []);
-
       setMode("advanced");
       setAOI(aoi);
       flyTo({
@@ -440,176 +345,209 @@ export default function Sidebar() {
     }
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <aside
-      className={`h-full ${
-        mode === "simple"
-          ? "rounded-xl border border-slate-200/70 bg-white/90 backdrop-blur shadow-lg text-slate-900"
-          : "bg-[#0d1526] text-slate-100"
-      } p-4 flex flex-col gap-4`}
-    >
-      <div>
-        <h1 className="text-lg font-semibold leading-tight">GeoAI Risk Mapper</h1>
-        <p className={`text-xs mt-1 ${mode === "simple" ? "text-slate-600" : "text-slate-400"}`}>
-          Flood & Heat Risk Analysis
-        </p>
+    <aside className="flex h-full flex-col gap-3 overflow-y-auto bg-[#0d1526] p-4 text-slate-100">
+      {/* Header */}
+      <div className="flex items-center gap-3 pb-1">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/10 text-cyan-300 shadow-[0_0_24px_rgba(34,211,238,0.15)]">
+          <svg viewBox="0 0 18 18" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <circle cx="9" cy="9" r="6.5" />
+            <path d="M9 4v5l3 2" strokeLinecap="round" />
+            <circle cx="9" cy="9" r="1.2" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-sm font-bold leading-none tracking-tight text-slate-50">
+            GeoAI Risk Mapper
+          </h1>
+          <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-cyan-400/70">
+            Flood · Heat · Terrain
+          </p>
+        </div>
       </div>
 
-      <div
-        className={`text-xs rounded-md p-2 ${
-          mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-300"
-        }`}
-      >
-        <span className="font-semibold">AOI: </span>
-        {aoiLabel}
-        {drawnPath && drawnPath.length >= 2 && (
-          <span className={`ml-1 ${mode === "simple" ? "text-cyan-600" : "text-cyan-400"}`}>
-            ({drawnPath.length} pts)
-          </span>
+      <div className="h-px w-full bg-white/[0.06]" />
+
+      {/* AOI */}
+      <Panel>
+        <SectionLabel>Area of Interest</SectionLabel>
+        {aoiLabel ? (
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-slate-100">{aoiLabel.span}</div>
+            <div className="font-mono text-[11px] text-slate-400">{aoiLabel.coords}</div>
+            {drawnPath && drawnPath.length >= 2 && (
+              <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] text-cyan-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                {drawnPath.length} path points
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <svg className="h-3.5 w-3.5 flex-shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M7 1C4.8 1 3 2.8 3 5c0 3.5 4 8 4 8s4-4.5 4-8c0-2.2-1.8-4-4-4z" />
+              <circle cx="7" cy="5" r="1.3" />
+            </svg>
+            No path drawn yet
+          </div>
         )}
-      </div>
+      </Panel>
 
-      <div
-        className={`text-xs rounded-md p-2 ${
-          mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-300"
-        }`}
-      >
-        <div className="mb-1 flex items-center justify-between">
-          <span className="font-semibold">Line Width</span>
-          <span>{pathWidthMeters} m</span>
-        </div>
-        <input
-          type="range"
-          min={5}
-          max={120}
-          step={5}
-          value={pathWidthMeters}
-          onChange={(event) => setPathWidthMeters(Number(event.target.value))}
-          className="w-full accent-cyan-500"
-        />
-      </div>
+      {mode === "advanced" && (
+        <>
+          {/* Elevation source */}
+          <Panel>
+            <SectionLabel>Elevation Data</SectionLabel>
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-slate-600">
+                  Provider
+                </label>
+                <select
+                  value={elevationProvider}
+                  onChange={(e) => setElevationProvider(e.target.value as ProviderSelectValue)}
+                  className="select-dark w-full rounded-lg border border-white/[0.08] bg-[#0b1220] px-2.5 py-1.5 text-xs text-slate-200 focus:border-cyan-400/30 focus:outline-none"
+                >
+                  <option value="default">Auto (default chain)</option>
+                  {providerOptions.map((p) => (
+                    <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-slate-600">
+                  Dataset
+                </label>
+                <select
+                  value={elevationDataset}
+                  onChange={(e) => setElevationDataset(e.target.value)}
+                  disabled={elevationProvider === "default" || datasetOptions.length === 0}
+                  className="select-dark w-full rounded-lg border border-white/[0.08] bg-[#0b1220] px-2.5 py-1.5 text-xs text-slate-200 focus:border-cyan-400/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <option value="default">
+                    {elevationProvider === "default"
+                      ? "Default chain selection"
+                      : datasetOptions.length
+                      ? "Default dataset"
+                      : "No dataset option"}
+                  </option>
+                  {datasetOptions.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </Panel>
+        </>
+      )}
 
-      <div
-        className={`rounded-md p-3 space-y-2 ${
-          mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-200"
-        }`}
-      >
-        <p className="text-xs font-semibold">Elevation Source</p>
-
-        <div className="space-y-1">
-          <label className="block text-[11px] uppercase tracking-wide opacity-80">Provider</label>
-          <select
-            value={elevationProvider}
-            onChange={(event) => setElevationProvider(event.target.value as ProviderSelectValue)}
-            className={`w-full rounded-md px-2 py-1 text-xs border ${
-              mode === "simple"
-                ? "bg-white border-slate-300 text-slate-900"
-                : "bg-[#111827] border-slate-700 text-slate-100"
-            }`}
-          >
-            <option value="default">Auto (default chain)</option>
-            {providerOptions.map((provider) => (
-              <option key={provider} value={provider}>
-                {PROVIDER_LABELS[provider]}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="space-y-1">
-          <label className="block text-[11px] uppercase tracking-wide opacity-80">Dataset</label>
-          <select
-            value={elevationDataset}
-            onChange={(event) => setElevationDataset(event.target.value)}
-            disabled={elevationProvider === "default" || datasetOptions.length === 0}
-            className={`w-full rounded-md px-2 py-1 text-xs border disabled:opacity-50 disabled:cursor-not-allowed ${
-              mode === "simple"
-                ? "bg-white border-slate-300 text-slate-900"
-                : "bg-[#111827] border-slate-700 text-slate-100"
-            }`}
-          >
-            <option value="default">
-              {elevationProvider === "default"
-                ? "Default chain selection"
-                : datasetOptions.length
-                ? "Default dataset"
-                : "No dataset option"}
-            </option>
-            {datasetOptions.map((dataset) => (
-              <option key={dataset.value} value={dataset.value}>
-                {dataset.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
+      {/* Run Analysis CTA */}
       <button
         type="button"
         onClick={onRunAnalysis}
         disabled={isRunning || !aoi}
-        className={`rounded-md px-3 py-2 text-sm font-semibold ${
-          isRunning || !aoi
-            ? "bg-slate-500 text-white cursor-not-allowed"
-            : "bg-cyan-500 text-black hover:bg-cyan-400"
+        className={`relative w-full overflow-hidden rounded-xl px-4 py-3 text-sm font-bold transition-all duration-300 ${
+          isRunning
+            ? "cursor-not-allowed bg-slate-800 text-slate-500"
+            : !aoi
+            ? "cursor-not-allowed bg-slate-800/60 text-slate-600"
+            : "animate-glow-pulse bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 active:scale-[0.98]"
         }`}
       >
-        {isRunning ? "Analyzing..." : !aoi ? "Draw a path first" : "Run Analysis"}
+        {isRunning ? (
+          <span className="flex items-center justify-center gap-2">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-slate-300" />
+            Analyzing…
+          </span>
+        ) : !aoi ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="h-4 w-4 opacity-50" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M8 2C5.2 2 3 4.2 3 7c0 4.5 5 9 5 9s5-4.5 5-9c0-2.8-2.2-5-5-5z" />
+              <circle cx="8" cy="7" r="1.5" />
+            </svg>
+            Draw a path first
+          </span>
+        ) : (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <polygon points="3,2 13,8 3,14" fill="currentColor" stroke="none" />
+            </svg>
+            Run Analysis
+          </span>
+        )}
       </button>
 
-      {lastAnalysisDurationSeconds !== null && hasResults && (
-        <div
-          className={`inline-flex self-start rounded-full px-2 py-1 text-[11px] font-semibold ${
-            mode === "simple" ? "bg-slate-100 text-slate-700" : "bg-slate-900 text-slate-200"
-          }`}
-        >
+      {/* Duration badge */}
+      {mode === "advanced" && lastAnalysisDurationSeconds !== null && hasResults && (
+        <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-[11px] text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
           {lastAnalysisDurationSeconds < 0.5
-            ? `Cached — returned in ${lastAnalysisDurationSeconds.toFixed(1)}s`
+            ? `Cached — ${lastAnalysisDurationSeconds.toFixed(1)}s`
             : `Completed in ${lastAnalysisDurationSeconds.toFixed(1)}s`}
         </div>
       )}
 
-      {hasResults && (
-        <div className={`rounded-md p-3 ${mode === "simple" ? "bg-slate-100" : "bg-slate-900"} space-y-2`}>
-          <p className="text-xs font-semibold">Risk Layer</p>
-          <div className="flex gap-2">
+      {/* Risk layer controls */}
+      {mode === "advanced" && hasResults && (
+        <Panel>
+          <SectionLabel>Risk Layer</SectionLabel>
+
+          {/* Segmented control */}
+          <div className="flex rounded-lg border border-white/[0.08] bg-black/20 p-0.5">
             {(["flood", "heat"] as const).map((layer) => (
               <button
                 key={layer}
                 type="button"
                 onClick={() => setActiveLayer(layer)}
-                className={`flex-1 rounded px-2 py-1 text-xs font-semibold capitalize ${
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold capitalize transition-all ${
                   activeLayer === layer
                     ? layer === "flood"
-                      ? "bg-blue-500 text-white"
-                      : "bg-orange-500 text-white"
-                    : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                      ? "bg-blue-500/20 text-blue-300 shadow-inner"
+                      : "bg-orange-500/20 text-orange-300 shadow-inner"
+                    : "text-slate-500 hover:text-slate-300"
                 }`}
               >
+                {layer === "flood" ? (
+                  <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+                    <path d="M1 9c1-2 2-3 3-3s2 2 3 2 2-2 3-2" strokeLinecap="round" />
+                    <path d="M1 6c1-2 2-3 3-3s2 2 3 2 2-2 3-2" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+                    <circle cx="6" cy="6" r="3" />
+                    <path d="M6 1v1M6 10v1M1 6h1M10 6h1M2.5 2.5l.7.7M8.8 8.8l.7.7M2.5 9.5l.7-.7M8.8 3.2l.7-.7" strokeLinecap="round" />
+                  </svg>
+                )}
                 {layer}
               </button>
             ))}
           </div>
-          <div className="text-xs space-y-1">
-            {[
-              { color: "#4caf50", label: "Low" },
-              { color: "#ffeb3b", label: "Medium" },
-              { color: "#ff9800", label: "High" },
-              { color: "#f44336", label: "Extreme" },
-            ].map(({ color, label }) => (
-              <div key={label} className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-sm inline-block" style={{ background: color }} />
-                {label}
-              </div>
-            ))}
+
+          {/* Legend gradient bar */}
+          <div className="mt-3">
+            <div
+              className="h-2 w-full rounded-full"
+              style={{ background: "linear-gradient(to right, #4caf50, #ffeb3b, #ff9800, #f44336)" }}
+            />
+            <div className="mt-1.5 flex justify-between text-[10px] font-medium text-slate-500">
+              <span>Low</span>
+              <span>Medium</span>
+              <span>High</span>
+              <span>Extreme</span>
+            </div>
           </div>
-        </div>
+        </Panel>
       )}
 
-      {!hasResults && !isRunning && (
-        <div className={`mt-auto text-xs ${mode === "simple" ? "text-slate-600" : "text-slate-400"}`}>
-          Click <strong>Draw Path</strong> on the map, place points along the road, then hit
-          <strong> Run Analysis</strong>.
+      {/* Instructions */}
+      {mode === "advanced" && !hasResults && !isRunning && (
+        <div className="mt-auto rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-xs leading-relaxed text-slate-500">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+            Getting started
+          </p>
+          Use <span className="text-slate-400">Draw Path</span> on the map to trace a road or area,
+          then press <span className="text-slate-400">Run Analysis</span> to compute flood and heat risk.
         </div>
       )}
     </aside>
