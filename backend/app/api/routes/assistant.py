@@ -47,8 +47,8 @@ class AssistantChatRequest(BaseModel):
     messages: list[AssistantMessage] = Field(default_factory=list)
     tools: list[dict[str, Any]] = Field(default_factory=list)
     model: str | None = None
-    temperature: float = 0.2
-    max_tokens: int = 1200
+    temperature: float = 0.3
+    max_tokens: int = 2000
     tool_choice: str | dict[str, Any] = "auto"
 
 

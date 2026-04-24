@@ -35,6 +35,12 @@ const config: Config = {
           "0%, 80%, 100%": { transform: "translateY(0)", opacity: "0.4" },
           "40%": { transform: "translateY(-5px)", opacity: "1" },
         },
+        "scan-line": {
+          "0%": { top: "0%", opacity: "0" },
+          "5%": { opacity: "1" },
+          "95%": { opacity: "1" },
+          "100%": { top: "100%", opacity: "0" },
+        },
       },
       animation: {
         "fade-in": "fade-in 250ms ease-out",
@@ -42,6 +48,7 @@ const config: Config = {
         "slide-in-left": "slide-in-left 320ms cubic-bezier(0.32,0.72,0,1)",
         "glow-pulse": "glow-pulse 2.2s ease-in-out infinite",
         "dot-bounce": "dot-bounce 1.4s ease-in-out infinite",
+        "scan-line": "scan-line 2s linear infinite",
       },
     },
   },

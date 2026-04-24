@@ -235,7 +235,10 @@ async function getOSRMRoute(coords: { lat: number; lon: number }[]) {
 
 function buildSystemPrompt() {
   const state = useAnalysisStore.getState();
-  const hasRisk = state.floodLayers.length > 0 || state.heatLayers.length > 0;
+  const hasFlood = state.floodLayers.length > 0;
+  const hasHeat  = state.heatLayers.length > 0;
+  const hasRisk  = hasFlood || hasHeat;
+
   const aoiCenter = state.aoi
     ? {
         lat: ((state.aoi.north + state.aoi.south) / 2).toFixed(4),
@@ -243,24 +246,71 @@ function buildSystemPrompt() {
       }
     : null;
 
-  return `You are GeoAI, a geospatial assistant for flood/heat risk mapping.
+  // Extract real pipeline stats to give the bot real numbers
+  const fc = ((hasFlood ? state.floodLayers[0] : state.heatLayers[0])?.components ?? {}) as Record<string, number>;
+  const hc = ((hasHeat  ? state.heatLayers[0]  : state.floodLayers[0])?.components ?? {}) as Record<string, number>;
 
-TOOL RULES (never violate):
-- run_risk_analysis: ONLY if user names a specific place. Never invent locations.
-- set_waypoints: ONLY if user gives 2+ place names. Never invent destinations.
-- Knowledge questions (why/how/what causes): answer directly, no tools.
-- get_risk_summary: when user asks about current map results.
-- geocode_location: when user asks to navigate/find a place.
-- get_weather: when user asks about weather. If user says "here", "there", "this area" — still call get_weather, the tool will use the current map area automatically.
-- The current map area from the zustand store is authoritative. If it exists and the user asks about weather "here/there/current area", use that area and do not invent a city name.
+  // Derived interpretations — compute these so the bot reasons, not just lists
+  const tempC      = Number(hc.mean_temp_c ?? 0);
+  const rainfall   = Number(fc.total_rainfall_mm ?? 0);
+  const impervious = Number(fc.vision_impervious ?? hc.uhi_proxy ?? 0);
+  const vegetation = Number(hc.vegetation_coverage ?? 0);
+  const uhi        = Number(hc.uhi_intensity_c ?? 0);
+  const runoff     = Number(fc.runoff_coefficient ?? 0);
+  const slope      = Number(fc.mean_slope_deg ?? 0);
+  const floodScore = Number(fc.mean_flood_score ?? 0);
+  const heatScore  = Number(hc.mean_heat_score ?? 0);
+  const standingW  = Number(fc.standing_water_pct ?? 0);
+  const drainageIdx = Number(fc.drainage_index ?? 0);
+
+  const tempContext   = tempC < 15 ? "cold" : tempC < 22 ? "mild" : tempC < 30 ? "warm" : "hot";
+  const rainContext   = rainfall < 5 ? "very dry (drought-like)" : rainfall < 20 ? "dry" : rainfall < 50 ? "moderate" : rainfall < 100 ? "wet" : "very wet";
+  const imperContext  = impervious > 0.7 ? "heavily urbanised (dense concrete/asphalt)" : impervious > 0.45 ? "moderately urbanised" : "mixed/semi-urban";
+  const vegContext    = vegetation > 0.5 ? "good vegetation cover (natural cooling buffer)" : vegetation > 0.25 ? "moderate vegetation" : "sparse vegetation (limited cooling)";
+  const floodContext  = floodScore < 0.2 ? "negligible" : floodScore < 0.4 ? "low — occasional surface pooling possible" : floodScore < 0.6 ? "medium — flash flood risk in heavy rain events" : "high — significant flood hazard";
+  const heatContext   = heatScore < 0.2 ? "low — comfortable ambient conditions" : heatScore < 0.4 ? "low-medium — UHI effect present but manageable" : heatScore < 0.6 ? "medium — heat stress risk for vulnerable populations" : "high — dangerous heat conditions";
+  const drainContext  = drainageIdx < 0.2 ? "very poor — water accumulates easily" : drainageIdx < 0.4 ? "poor" : drainageIdx < 0.6 ? "moderate" : "good natural drainage";
+
+  const statsBlock = hasRisk ? `
+LIVE ANALYSIS DATA — you have full access to these real measurements:
+• Temperature: ${tempC.toFixed(1)}°C (${tempContext})
+• Rainfall last 7 days: ${rainfall.toFixed(1)} mm (${rainContext})
+• Surface cover: ${Math.round(impervious * 100)}% impervious (${imperContext}), ${Math.round(vegetation * 100)}% vegetation (${vegContext})
+• UHI intensity: +${uhi.toFixed(1)}°C above surrounding rural areas
+• Runoff coefficient: ${runoff.toFixed(2)} — ${runoff > 0.7 ? "very high runoff, sealed surfaces dominate" : runoff > 0.45 ? "moderate-high runoff" : "moderate runoff, some infiltration"}
+• Terrain slope: ${slope.toFixed(1)}° — ${slope < 1 ? "nearly flat (water accumulates, doesn't drain)" : slope < 5 ? "gentle slope (slow drainage)" : "moderate slope (faster runoff)"}
+• Drainage: ${drainContext}
+• Standing water in street images: ${Math.round(standingW * 100)}%
+• Flood risk score: ${Math.round(floodScore * 100)}% — ${floodContext}
+• Heat risk score: ${Math.round(heatScore * 100)}% — ${heatContext}
+• Analysis used: SegFormer AI (pixel-level segmentation of ${state.images?.length ?? 0} street images)` : "";
+
+  return `You are GeoAI — a senior geospatial risk analyst specialising in urban flood and heat hazards.
+You think like a hydrologist and urban climatologist. Your job is to give expert INTERPRETATION, not data dumps.
+
+HOW TO ANSWER RISK QUESTIONS:
+- Explain WHY the risk is what it is (causation, not just scores)
+- Connect the dots: "56% impervious → high runoff → flood risk amplified on flat terrain"
+- Flag the real danger even when overall score is low (e.g. dry soil + flat terrain = flash flood risk)
+- For heat: always mention UHI effect, vegetation role, and vulnerable population impact
+- For hydraulics: explain what the runoff coefficient and drainage index mean in practice
+- Recommend concrete actions when risk is medium or higher
+- Be conversational and expert, NOT a bullet-point data dump
+- 3–5 sentences for simple questions, 1–2 short paragraphs for "explain/analyse" questions
+
+TOOL RULES:
+- run_risk_analysis: ONLY when user names a specific place
+- set_waypoints: ONLY with 2+ place names
+- get_risk_summary: when asked about current results (but YOU already have the data below — use it directly first)
+- geocode_location: navigating to a place
+- get_weather: weather questions ("here" uses current map area)
 
 APP STATE:
-- Risk loaded: ${hasRisk ? `YES (${state.floodLayers.length} flood, ${state.heatLayers.length} heat zones)` : "NO"}
-- Current map area: ${aoiCenter ? `lat ${aoiCenter.lat}, lon ${aoiCenter.lon}` : "none set"}
-- Active layer: ${state.activeLayer} | Running: ${state.isRunning ? "YES — wait" : "no"}
-
-Scores: 0-0.2=none, 0.2-0.4=low, 0.4-0.6=medium, 0.6-0.8=high, 0.8-1.0=extreme.
-Be concise. Use bullet points. Max 100 words per response.`;
+- Analysis loaded: ${hasRisk ? `YES — ${state.floodLayers.length} flood zones, ${state.heatLayers.length} heat zones` : "NO — tell user to draw an area and run analysis"}
+- Map centre: ${aoiCenter ? `${aoiCenter.lat}, ${aoiCenter.lon}` : "none"}
+- Running: ${state.isRunning ? "YES — tell user to wait" : "no"}
+${statsBlock}
+Score scale: 0–0.2 none · 0.2–0.4 low · 0.4–0.6 medium · 0.6–0.8 high · 0.8–1.0 extreme`;
 }
 
 // Contextual suggestions based on current store state
@@ -272,17 +322,18 @@ function getContextualSuggestions(): string[] {
   const suggestions: string[] = [];
 
   if (hasRisk) {
-    suggestions.push("Explain the risk results");
-    suggestions.push("What's the weather in this area?");
+    suggestions.push("Why is the flood risk this level?");
+    suggestions.push("What does the UHI mean for residents here?");
+    suggestions.push("What actions should be taken to reduce risk?");
   } else if (hasAoi) {
     suggestions.push("Run a risk analysis here");
     suggestions.push("What's the weather in this area?");
+    suggestions.push("Route from Tunis to Sousse");
   } else {
     suggestions.push("Analyze flood risk in Nabeul");
     suggestions.push("Show me Tunis on the map");
+    suggestions.push("Route from Tunis to Sousse");
   }
-
-  suggestions.push("Route from Tunis to Sousse");
 
   return suggestions.slice(0, 3);
 }
@@ -469,18 +520,45 @@ async function executeTool(
         };
       };
 
+      const fc = ((state.floodLayers[0])?.components ?? {}) as Record<string, unknown>;
+      const hc = ((state.heatLayers[0])?.components  ?? {}) as Record<string, unknown>;
+
       return JSON.stringify({
         aoi: state.aoi,
         active_layer: state.activeLayer,
-        analysis_duration_seconds: state.lastAnalysisDurationSeconds,
         flood: summarizeLayers(state.floodLayers),
         heat: summarizeLayers(state.heatLayers),
-        interpretation_guide: {
-          score_ranges: "0-0.2=none, 0.2-0.4=low, 0.4-0.6=medium, 0.6-0.8=high, 0.8-1.0=extreme",
-          weather_score: "0-1, from 7-day rainfall totals",
-          terrain_score: "0-1, higher = flatter/lower = more flood prone",
-          impervious_surface: "0-1, fraction of concrete/asphalt",
-          vegetation: "0-1, higher = more trees = better drainage/cooling",
+        hydraulic_data: {
+          total_rainfall_mm: fc.total_rainfall_mm,
+          peak_intensity_mm_hr: fc.peak_intensity_mm_hr,
+          runoff_coefficient: fc.runoff_coefficient,
+          peak_flow_index: fc.peak_flow_index,
+          drainage_index: fc.drainage_index,
+          mean_slope_deg: fc.mean_slope_deg,
+          standing_water_pct: fc.standing_water_pct,
+          high_risk_pct: fc.high_risk_pct,
+          mean_flood_score: fc.mean_flood_score,
+          impervious_surface_pct: fc.vision_impervious,
+          simulation_engine: fc.engine,
+        },
+        heat_data: {
+          mean_temp_c: hc.mean_temp_c,
+          heat_index_c: hc.heat_index_c,
+          heat_stress_score: hc.heat_stress_score,
+          uhi_intensity_c: hc.uhi_intensity_c,
+          uhi_proxy: hc.uhi_proxy,
+          vegetation_coverage: hc.vegetation_coverage,
+          shadow_coverage: hc.shadow_coverage,
+          cooling_deficit: hc.cooling_deficit,
+          high_heat_pct: hc.high_heat_pct,
+          drought_days: hc.drought_days,
+        },
+        interpretation: {
+          scores: "0–0.2=none, 0.2–0.4=low, 0.4–0.6=medium, 0.6–0.8=high, 0.8–1.0=extreme",
+          runoff_coeff: "0=permeable surface, 1=fully impervious (rooftops/asphalt)",
+          drainage_index: "0=poor drainage, 1=excellent natural drainage",
+          uhi_intensity: "extra degrees Celsius above rural baseline due to urban surfaces",
+          cooling_deficit: "gap between current cooling capacity and what is needed",
         },
       });
     }

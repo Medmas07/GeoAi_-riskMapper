@@ -81,6 +81,18 @@ class FloodRiskEngine:
 
         category = np.digitize(combined, bins=[0.2, 0.4, 0.6, 0.8]).astype(int)
 
+        # Hydraulic-derived metrics for display
+        mean_slope = float(terrain.slope_deg.mean())
+        runoff_coeff = float(np.clip(
+            0.3 + vision.mean_impervious * 0.5 - vision.mean_vegetation * 0.2, 0.05, 0.95
+        ))
+        # Rational method proxy: Q ≈ C × i × A  (relative index, not true m³/s)
+        peak_flow_index = round(runoff_coeff * weather.peak_intensity_mm_hr / 10.0, 3)
+        drainage_index = float(np.clip(
+            flow_norm.mean() * (1 - vision.mean_impervious * 0.4), 0, 1
+        ))
+        max_flow_acc = float(terrain.flow_accumulation.max())
+
         return FloodRiskGrid(
             score=combined,
             category=category,
@@ -94,6 +106,17 @@ class FloodRiskEngine:
                 "mean_sim_score": float(sim_score.mean()),
                 "vision_impervious": float(vision.mean_impervious),
                 "engine": simulation.engine_used,
+                # Hydraulic display stats
+                "total_rainfall_mm": round(weather.total_rainfall_mm, 1),
+                "peak_intensity_mm_hr": round(weather.peak_intensity_mm_hr, 1),
+                "runoff_coefficient": round(runoff_coeff, 3),
+                "peak_flow_index": peak_flow_index,
+                "drainage_index": round(drainage_index, 3),
+                "mean_slope_deg": round(mean_slope, 2),
+                "max_flow_accumulation": round(max_flow_acc, 0),
+                "standing_water_pct": round(vision.standing_water_pct, 3),
+                "mean_flood_score": round(float(combined.mean()), 3),
+                "high_risk_pct": round(float((combined > 0.6).mean()), 3),
             },
         )
 
