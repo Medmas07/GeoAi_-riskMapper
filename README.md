@@ -1,6 +1,6 @@
-# GeoAI Risk Mapper
+# Pathora
 
-GeoAI Risk Mapper is a climate risk intelligence platform that helps teams understand **where flood and urban heat risks are highest** and what to do about them.
+Pathora is a climate risk intelligence platform that helps teams understand **where flood and urban heat risks are highest** and what to do about them.
 
 It is designed for:
 - **City and regional planners**
@@ -20,7 +20,7 @@ The platform combines geospatial data, weather information, street-level imagery
 
 ## Business value
 
-GeoAI Risk Mapper is built to support faster decisions with less manual effort.
+Pathora is built to support faster decisions with less manual effort.
 
 ### Key outcomes
 - **Faster planning:** turn risk data into clear decisions in minutes
