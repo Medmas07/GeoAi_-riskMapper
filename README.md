@@ -1,4 +1,4 @@
-# GeoAI RiskMapper
+# El-Morched
 
 > A full-stack geospatial platform for real-time **flood** and **urban heat** risk analysis — powered by terrain modeling, weather history, computer vision, hydraulic simulation, and an AI assistant.
 
