@@ -8,12 +8,13 @@
 
 ## Screenshots
 
-| Default View | OSM + Routing | Satellite + Routing | Advanced Mode (Post-Analysis) |
-|---|---|---|---|
-| Map on launch | Draw waypoints on OSM, get a route | Same routing on satellite imagery | Full risk overlay with stats panel |
+| Default View | OSM + Routing |
+|---|---|
+| ![Default View](docs/image_.jpeg) | ![OSM Routing](docs/image_osm.jpg) |
 
-> Screenshots in `docs/`
-
+| Satellite + Routing | Advanced Mode |
+|---|---|
+| ![Satellite](docs/image_satellite.jpg) | ![Advanced Mode](docs/image_advanced_mode.jpg) |
 ---
 
 ## Features
